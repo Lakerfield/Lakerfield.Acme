@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src\Lakerfield.Acme\Lakerfield.Acme.csproj" Type="Classic C#"/>
+  <Project Path="src\Lakerfield.Acme.Playground\Lakerfield.Acme.Playground.csproj" Type="Classic C#"/>
+</Solution>
