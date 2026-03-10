@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+echo "Checking C# formatting..."
+
+# Run dotnet format to check for unformatted files
+dotnet format --verify-no-changes 2>/dev/null
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Code formatting issues found!"
+    echo "Run 'dotnet format' to fix formatting before committing."
+    exit 1
+fi
+
+echo "✓ Formatting check passed"
+exit 0

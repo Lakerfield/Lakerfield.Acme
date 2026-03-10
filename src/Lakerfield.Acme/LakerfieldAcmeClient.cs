@@ -1,4 +1,4 @@
-﻿namespace Lakerfield.Acme;
+namespace Lakerfield.Acme;
 
 public class LakerfieldAcmeClient
 {
