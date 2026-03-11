@@ -155,7 +155,7 @@ public class LakerfieldAcmeClient : IDisposable
   {
     var jwsHeader = CreateJwsHeader();
 
-    await using var requestContent =
+    using var requestContent =
       new StringContent(JwtHelper.Encode($"{{\"identifier\":{{\"value\":\"{domain}\"}}}}"), Encoding.UTF8,
         "application/json")
       {
@@ -183,6 +183,43 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
+  /// Get authorization by ID.
+  /// </summary>
+  private async Task<Authorization> GetAuthorizationAsync(string authzId)
+  {
+    var response = await _httpClient.GetAsync($"authz/{authzId}").ConfigureAwait(false);
+
+    if (!response.IsSuccessStatusCode)
+    {
+      throw new AcmeException($"Failed to get authorization: {response.StatusCode}");
+    }
+
+    var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+    return JsonSerializer.Deserialize<Authorization>(content)!;
+  }
+
+  /// <summary>
+  /// Get challenge by ID.
+  /// </summary>
+  private async Task<Challenge> GetChallengeAsync(string challId)
+  {
+    // Challenge URL is typically within authorization
+    string challengeUrl = Authorization != null
+      ? $"{AcmeServerUrl}/authz/{Authorization.Id}/chall/{challId}"
+      : $"{AcmeServerUrl}/chall/{challId}";
+
+    var response = await _httpClient.GetAsync(challengeUrl).ConfigureAwait(false);
+
+    if (!response.IsSuccessStatusCode)
+    {
+      throw new AcmeException($"Failed to get challenge: {response.StatusCode}");
+    }
+
+    var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+    return JsonSerializer.Deserialize<Challenge>(content)!;
+  }
+
+  /// <summary>
   /// Get authorization for domain (if already requested).
   /// </summary>
   public async Task<Authorization> RequestAuthorizationForDomainAsync(string domain)
@@ -195,7 +232,7 @@ public class LakerfieldAcmeClient : IDisposable
 
     try
     {
-      var authz = await GetAuthorizationAsync(authorizationId).ConfigureAwait(false);
+      var authz = await GetAuthorizationAsync(authorizationId!).ConfigureAwait(false);
 
       if (authz.Status != "valid")
       {
