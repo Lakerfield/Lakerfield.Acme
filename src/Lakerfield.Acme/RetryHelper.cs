@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Lakerfield.Acme;
+namespace Lakerfield.Acme.Models;
 
 /// <summary>
 /// Retry Policy helper conform best practices.
@@ -10,7 +10,7 @@ public static class RetryHelper
   /// <summary>
   /// Default retry config voor ACME calls.
   /// </summary>
-  public static Models.AcmeRetryConfig DefaultRetryPolicy { get; } = new()
+  public static AcmeRetryConfig DefaultRetryPolicy { get; } = new()
   {
     MaxAttempts = 3,
     InitialDelaySeconds = 2,

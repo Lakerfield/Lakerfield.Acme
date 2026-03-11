@@ -25,24 +25,3 @@ public class JwsHeaderExtensions
   /// </summary>
   public string Url { get; set; } = default!;
 }
-
-/// <summary>
-/// ACME Client Error conform RFC 8555 Appendix C
-/// </summary>
-public class AcmeError
-{
-  /// <summary>
-  /// Error type identifier
-  /// </summary>
-  public string Type { get; set; } = default!;
-
-  /// <summary>
-  /// Human-readable error message
-  /// </summary>
-  public string Detail { get; set; } = default!;
-
-  /// <summary>
-  /// Optional additional context
-  /// </summary>
-  public string? Title { get; set; }
-}

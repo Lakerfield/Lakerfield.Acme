@@ -74,3 +74,13 @@ public enum ChallengeStatus
   Invalid,
   Ready
 }
+
+/// <summary>
+/// Type van ACME challenge.
+/// </summary>
+public enum ChallengeType
+{
+  Http01,
+  Dns01,
+  TlsAlpn01
+}

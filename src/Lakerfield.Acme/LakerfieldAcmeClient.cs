@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Lakerfield.Acme.Models;
@@ -17,7 +18,7 @@ public class LakerfieldAcmeClient : IDisposable
 {
   private readonly HttpClient _httpClient;
   private readonly IAcmeStorage _storage;
-  private readonly RetryHelper.AcmeRetryConfig _retryPolicy;
+  private readonly AcmeRetryConfig _retryPolicy;
   private Account? _account;
 
   /// <summary>
@@ -40,8 +41,7 @@ public class LakerfieldAcmeClient : IDisposable
   /// </summary>
   public Dictionary<string, Challenge> Challenges { get; } = new();
 
-  public LakerfieldAcmeClient(HttpClient httpClient, IAcmeStorage storage,
-    RetryHelper.AcmeRetryConfig? retryPolicy = null)
+  public LakerfieldAcmeClient(HttpClient httpClient, IAcmeStorage storage, AcmeRetryConfig? retryPolicy = null)
   {
     _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     _storage = storage ?? throw new ArgumentNullException(nameof(storage));
@@ -51,15 +51,15 @@ public class LakerfieldAcmeClient : IDisposable
     _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Lakerfield.Acme", "1.0"));
     _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue($"DotNet/{Environment.Version}"));
 
-    // Haal directory URL op
+    // Load directory URL op
     LoadDirectoryAsync().GetAwaiter().GetResult();
   }
 
   /// <summary>
   /// Factory methode zonder explicit HttpClient - gebruikt default.
   /// </summary>
-  public LakerfieldAcmeClient(IAcmeStorage storage, RetryHelper.AcmeRetryConfig? retryPolicy = null) : this(
-    new HttpClient(), storage, retryPolicy)
+  public LakerfieldAcmeClient(IAcmeStorage storage, AcmeRetryConfig? retryPolicy = null) : this(new HttpClient(),
+    storage, retryPolicy)
   {
   }
 
@@ -135,6 +135,20 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
+  /// Create account response placeholder.
+  /// </summary>
+  private Task<Account> CreateAccountWithJwsAsync(JwsHeaderExtensions header, string privateKeyJwk)
+  {
+    throw new NotImplementedException("Account creation requires full JWS implementation");
+  }
+
+  private byte[] EncodePrivateKey(byte[] privateKeyBytes)
+  {
+    // Placeholder - return as is
+    return privateKeyBytes;
+  }
+
+  /// <summary>
   /// Request authorization for domain.
   /// </summary>
   public async Task<Authorization> RequestAuthorizationAsync(string domain)
@@ -142,12 +156,12 @@ public class LakerfieldAcmeClient : IDisposable
     var jwsHeader = CreateJwsHeader();
 
     await using var requestContent =
-      new StringContent(JwtHelper.Encode($"{{\"identifier\":{{\"value\":\"{domain}\"}}}}"), System.Text.Encoding.UTF8,
+      new StringContent(JwtHelper.Encode($"{{\"identifier\":{{\"value\":\"{domain}\"}}}}"), Encoding.UTF8,
         "application/json")
       {
         Headers =
         {
-          ContentType = new MediaTypeWithQualityHeaderValue("application/jose+json")
+          ContentType = MediaTypeHeaderValue.Parse("application/jose+json")
         }
       };
 
@@ -305,11 +319,11 @@ public class LakerfieldAcmeClient : IDisposable
   /// </summary>
   public async Task SubmitChallengeAsync(string challId)
   {
-    await using var content = new StringContent("{}")
+    StringContent content = new StringContent("{}")
     {
       Headers =
       {
-        ContentType = new MediaTypeWithQualityHeaderValue("application/jose+json")
+        ContentType = MediaTypeHeaderValue.Parse("application/jose+json")
       }
     };
 
@@ -356,11 +370,11 @@ public class LakerfieldAcmeClient : IDisposable
 
     string postJson = $"{{\"certificate\":\"{Convert.ToBase64String(digest)}\",\"revokeReason\":0}}";
 
-    await using var content = new StringContent(postJson, System.Text.Encoding.UTF8, "application/json")
+    StringContent content = new StringContent(postJson, Encoding.UTF8, "application/json")
     {
       Headers =
       {
-        ContentType = new MediaTypeWithQualityHeaderValue("application/jose+json")
+        ContentType = MediaTypeHeaderValue.Parse("application/jose+json")
       }
     };
 
@@ -373,8 +387,10 @@ public class LakerfieldAcmeClient : IDisposable
   /// </summary>
   public async Task DeactivateAccountAsync()
   {
+    StringContent content = new StringContent("{}");
+
     var response = await _httpClient.PostAsync(
-        $"{AcmeServerUrl}/acct/{_account!.Id}", new StringContent("{}"))
+        $"{AcmeServerUrl}/acct/{_account!.Id}", content)
       .ConfigureAwait(false);
 
     if (!response.IsSuccessStatusCode)
@@ -388,8 +404,10 @@ public class LakerfieldAcmeClient : IDisposable
   /// </summary>
   public async Task DeactivateAuthorizationAsync()
   {
+    StringContent content = new StringContent("{}");
+
     var response = await _httpClient.PostAsync(
-        $"{AcmeServerUrl}/acme/authz/{Authorization!.Id}", new StringContent("{}"))
+        $"{AcmeServerUrl}/acme/authz/{Authorization!.Id}", content)
       .ConfigureAwait(false);
 
     if (!response.IsSuccessStatusCode)
@@ -454,11 +472,11 @@ public class LakerfieldAcmeClient : IDisposable
     }
 
     // Load nonce van directory (vereist bij ACME v2)
-    var response = await _httpClient.GetAsync("/new-nonce").ConfigureAwait(false);
+    var response = _httpClient.GetAsync("/new-nonce").Result;
     string? nonce = null;
     if (response.IsSuccessStatusCode)
     {
-      string nonceContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+      string nonceContent = response.Content.ReadAsStringAsync().Result;
       nonce = JsonSerializer.Deserialize<string>(nonceContent);
     }
 
