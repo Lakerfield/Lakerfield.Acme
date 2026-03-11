@@ -45,19 +45,40 @@ try
   Console.WriteLine($"  newNonce:   {client.Directory?.NewNonce}");
   Console.WriteLine();
 
-  // Stap 2: Genereer een nieuw account key en maak een account aan
-  Console.WriteLine("Stap 2: Account aanmaken...");
-  var privateKey = client.GenerateAccountKey();
-  Console.WriteLine($"  EC P-256 private key gegenereerd ({privateKey.Length} bytes)");
-
-  // Sla de private key op voor later gebruik
+  // Stap 2: Laad bestaand account of maak een nieuw account aan
   var keyPath = Path.Combine(Path.GetTempPath(), "acme-account-key.der");
-  await File.WriteAllBytesAsync(keyPath, privateKey);
-  Console.WriteLine($"  Private key opgeslagen: {keyPath}");
+  var accountUrlPath = Path.Combine(Path.GetTempPath(), "acme-account-url.txt");
 
-  var account = await client.CreateAccountAsync(email: "admin@example.com");
-  Console.WriteLine($"  Account aangemaakt: {account.Url}");
-  Console.WriteLine($"  Account status: {account.Status}");
+  Account account;
+  if (File.Exists(keyPath) && File.Exists(accountUrlPath))
+  {
+    Console.WriteLine("Stap 2: Bestaand account laden...");
+    var savedKey = await File.ReadAllBytesAsync(keyPath);
+    var savedAccountUrl = await File.ReadAllTextAsync(accountUrlPath);
+    Console.WriteLine($"  Private key geladen: {keyPath}");
+    Console.WriteLine($"  Account URL geladen: {savedAccountUrl}");
+
+    account = await client.LoadAccountAsync(savedAccountUrl, savedKey);
+    Console.WriteLine($"  Account geladen: {account.Url}");
+    Console.WriteLine($"  Account status: {account.Status}");
+  }
+  else
+  {
+    Console.WriteLine("Stap 2: Nieuw account aanmaken...");
+    var privateKey = client.GenerateAccountKey();
+    Console.WriteLine($"  EC P-256 private key gegenereerd ({privateKey.Length} bytes)");
+
+    account = await client.CreateAccountAsync(email: "admin@example.com");
+    Console.WriteLine($"  Account aangemaakt: {account.Url}");
+    Console.WriteLine($"  Account status: {account.Status}");
+
+    // Sla de private key en account URL op voor later gebruik
+    await File.WriteAllBytesAsync(keyPath, privateKey);
+    await File.WriteAllTextAsync(accountUrlPath, account.Url);
+    Console.WriteLine($"  Private key opgeslagen: {keyPath}");
+    Console.WriteLine($"  Account URL opgeslagen: {accountUrlPath}");
+  }
+
   Console.WriteLine();
 
   // Stap 3: Maak een order aan voor een domein
