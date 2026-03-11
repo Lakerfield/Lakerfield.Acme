@@ -5,6 +5,9 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Lakerfield.Acme;
 using Lakerfield.Acme.Models;
+using Lakerfield.Acme.Playground;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 
 // ─── Playground voor Lakerfield.Acme ────────────────────────────────────────
 //
@@ -17,7 +20,22 @@ using Lakerfield.Acme.Models;
 //
 // Let's Encrypt staging server: https://acme-staging-v02.api.letsencrypt.org/directory
 // Let's Encrypt productie server: https://acme-v02.api.letsencrypt.org/directory
+//
+// OPMERKING: De minimale ASP.NET Core web app luistert op poort 5080.
+// In productie moet de web app luisteren op poort 80 voor HTTP-01 validatie.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Minimale ASP.NET Core web app voor HTTP-01 challenge hosting ────────────
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddAcmeHttp01Challenge();
+
+var webApp = builder.Build();
+webApp.Urls.Add("http://localhost:5080");
+webApp.UseAcmeHttp01Challenge();
+
+var tokenStore = webApp.Services.GetRequiredService<AcmeChallengeTokenStore>();
+
+await webApp.StartAsync();
 
 Console.WriteLine("Lakerfield.Acme Playground");
 Console.WriteLine("==========================");
@@ -120,18 +138,20 @@ try
       Console.WriteLine($"    Key Authorization: {keyAuthValue}");
       Console.WriteLine($"    URL: {challengeUrl}");
       Console.WriteLine();
-      Console.WriteLine($"  Sla het volgende bestand op op je webserver:");
-      Console.WriteLine($"    Pad: /.well-known/acme-challenge/{token}");
-      Console.WriteLine($"    Inhoud: {keyAuthValue}");
+      Console.WriteLine($"  Token geregistreerd op de lokale web app:");
+      Console.WriteLine($"    http://localhost:5080/.well-known/acme-challenge/{token}");
       Console.WriteLine();
 
-      // In een echte implementatie zou je hier het bestand op de webserver plaatsen
-      // en dan pas ValidateChallengeAsync aanroepen.
-      // Voor de demo stoppen we hier.
+      // Registreer de token in de lokale web app zodat de ACME server hem kan ophalen.
+      tokenStore.AddToken(token, keyAuthValue);
 
-      // await storage.SetHttpChallengeAsync(token, keyAuthValue);
+      // In een echte implementatie zou je hier ValidateChallengeAsync aanroepen
+      // nadat de ACME server het domein kan bereiken op poort 80.
+      // Verwijder daarna de token weer.
+
       // await client.ValidateChallengeAsync(httpChallenge.Url);
       // var validatedChallenge = await client.WaitForChallengeValidAsync(httpChallenge.Url);
+      // tokenStore.RemoveToken(token);
     }
 
     // DNS-01 voorbeeld
@@ -167,6 +187,10 @@ catch (Exception ex)
   Console.ForegroundColor = ConsoleColor.Red;
   Console.WriteLine($"Fout: {ex.GetType().Name}: {ex.Message}");
   Console.ResetColor();
+}
+finally
+{
+  await webApp.StopAsync();
 }
 
 // ─── In-Memory Storage implementatie ────────────────────────────────────────
