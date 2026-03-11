@@ -21,8 +21,8 @@ using Microsoft.Extensions.DependencyInjection;
 // Let's Encrypt staging server: https://acme-staging-v02.api.letsencrypt.org/directory
 // Let's Encrypt productie server: https://acme-v02.api.letsencrypt.org/directory
 //
-// OPMERKING: De minimale ASP.NET Core web app luistert op poort 5080.
-// In productie moet de web app luisteren op poort 80 voor HTTP-01 validatie.
+// OPMERKING: De minimale ASP.NET Core web app luistert op 0.0.0.0:80 voor HTTP-01 validatie.
+// Op Linux/macOS vereist luisteren op poort 80 verhoogde rechten (bijv. sudo of CAP_NET_BIND_SERVICE).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Minimale ASP.NET Core web app voor HTTP-01 challenge hosting ────────────
@@ -30,7 +30,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddAcmeHttp01Challenge();
 
 var webApp = builder.Build();
-webApp.Urls.Add("http://localhost:5080");
+webApp.Urls.Add("http://0.0.0.0:80");
 webApp.UseAcmeHttp01Challenge();
 
 var tokenStore = webApp.Services.GetRequiredService<AcmeChallengeTokenStore>();
@@ -139,19 +139,19 @@ try
       Console.WriteLine($"    URL: {challengeUrl}");
       Console.WriteLine();
       Console.WriteLine($"  Token geregistreerd op de lokale web app:");
-      Console.WriteLine($"    http://localhost:5080/.well-known/acme-challenge/{token}");
+      Console.WriteLine($"    http://{authz.Identifier}/.well-known/acme-challenge/{token}");
       Console.WriteLine();
 
       // Registreer de token in de lokale web app zodat de ACME server hem kan ophalen.
       tokenStore.AddToken(token, keyAuthValue);
 
-      // In een echte implementatie zou je hier ValidateChallengeAsync aanroepen
-      // nadat de ACME server het domein kan bereiken op poort 80.
-      // Verwijder daarna de token weer.
+      Console.WriteLine($"  Challenge valideren...");
+      await client.ValidateChallengeAsync(httpChallenge.Url!);
+      Console.WriteLine($"  Wachten op challenge validatie...");
+      var validatedChallenge = await client.WaitForChallengeValidAsync(httpChallenge.Url!);
+      Console.WriteLine($"  Challenge status: {validatedChallenge.Status}");
 
-      // await client.ValidateChallengeAsync(httpChallenge.Url);
-      // var validatedChallenge = await client.WaitForChallengeValidAsync(httpChallenge.Url);
-      // tokenStore.RemoveToken(token);
+      tokenStore.RemoveToken(token);
     }
 
     // DNS-01 voorbeeld
@@ -165,14 +165,26 @@ try
   }
 
   Console.WriteLine();
-  Console.WriteLine("Stap 5: (Demo - in echte implementatie)");
-  Console.WriteLine("  Na het provisionen van de challenge:");
-  Console.WriteLine("  1. await client.ValidateChallengeAsync(challenge.Url)");
-  Console.WriteLine("  2. await client.WaitForChallengeValidAsync(challenge.Url)");
-  Console.WriteLine("  3. await client.WaitForOrderReadyAsync(order.Url!)");
-  Console.WriteLine("  4. var (finalOrder, certKey) = await client.FinalizeOrderAsync(order, domains)");
-  Console.WriteLine("  5. await client.WaitForOrderValidAsync(finalOrder.Url!)");
-  Console.WriteLine("  6. var pem = await client.DownloadCertificateAsync(finalOrder)");
+  Console.WriteLine("Stap 5: Certificaat aanvragen en downloaden...");
+
+  Console.WriteLine("  Wachten tot order 'ready' is...");
+  var readyOrder = await client.WaitForOrderReadyAsync(order.Url!);
+  Console.WriteLine($"  Order status: {readyOrder.Status}");
+
+  Console.WriteLine("  Order finaliseren (CSR indienen)...");
+  var (pendingOrder, certPrivateKey) = await client.FinalizeOrderAsync(readyOrder, new[] { domain });
+  Console.WriteLine($"  Order status na finaliseren: {pendingOrder.Status}");
+
+  Console.WriteLine("  Wachten tot order 'valid' is...");
+  var validOrder = await client.WaitForOrderValidAsync(pendingOrder.Url!);
+  Console.WriteLine($"  Order status: {validOrder.Status}");
+
+  Console.WriteLine("  Certificaat downloaden...");
+  var pem = await client.DownloadCertificateAsync(validOrder);
+  Console.WriteLine();
+  Console.WriteLine("─── PEM Certificaat ────────────────────────────────────────────────────────");
+  Console.WriteLine(pem);
+  Console.WriteLine("────────────────────────────────────────────────────────────────────────────");
   Console.WriteLine();
   Console.WriteLine("Demo succesvol afgerond!");
 }
