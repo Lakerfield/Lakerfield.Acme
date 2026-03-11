@@ -233,18 +233,6 @@ public class LakerfieldAcmeClient : IDisposable
     EnsureDirectoryLoaded();
     EnsureAccountLoaded();
 
-    var identifiers = new List<Dictionary<string, string>>();
-    foreach (var domain in domains)
-    {
-      identifiers.Add(new Dictionary<string, string>
-      {
-        ["type"] = "dns",
-        ["value"] = domain.TrimStart('*', '.'), // Normaliseer wildcard domeinen
-      });
-    }
-
-    // Voor wildcard domeinen moet het domein zonder * in identifiers staan
-    // maar we slaan het origineel op voor DNS-01 challenge
     var actualIdentifiers = new List<Dictionary<string, string>>();
     foreach (var domain in domains)
     {
@@ -632,6 +620,8 @@ public class LakerfieldAcmeClient : IDisposable
   private async Task<HttpResponseMessage> PostJwsAsync(string url, string jwsBody)
   {
     using var content = new StringContent(jwsBody, Encoding.UTF8, "application/jose+json");
+    // RFC 8555 §6.2 requires Content-Type to be exactly "application/jose+json" without charset parameter
+    content.Headers.ContentType!.CharSet = null;
 
     var response = await _httpClient.PostAsync(url, content).ConfigureAwait(false);
 
