@@ -25,6 +25,9 @@ using Microsoft.Extensions.DependencyInjection;
 // On Linux/macOS, listening on port 80 requires elevated privileges (e.g. sudo or CAP_NET_BIND_SERVICE).
 // ─────────────────────────────────────────────────────────────────────────────
 
+var adminEmail = "admin@example.com";
+var testDomain = "example.com";
+
 // ─── Minimal ASP.NET Core web app for hosting HTTP-01 challenges ─────────────
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddAcmeHttp01Challenge();
@@ -86,7 +89,7 @@ try
     var privateKey = client.GenerateAccountKey();
     Console.WriteLine($"  EC P-256 private key generated ({privateKey.Length} bytes)");
 
-    account = await client.CreateAccountAsync(email: "admin@example.com");
+    account = await client.CreateAccountAsync(email: adminEmail);
     Console.WriteLine($"  Account created: {account.Url}");
     Console.WriteLine($"  Account status: {account.Status}");
 
@@ -100,7 +103,7 @@ try
   Console.WriteLine();
 
   // Step 3: Create an order for a domain
-  var domain = "example.com";
+  var domain = testDomain;
   Console.WriteLine($"Step 3: Creating order for {domain}...");
   var order = await client.CreateOrderAsync(domain);
   Console.WriteLine($"  Order URL: {order.Url}");
@@ -117,13 +120,18 @@ try
     Console.WriteLine($"  Domain: {authz.Identifier}");
     Console.WriteLine($"  Status: {authz.Status}");
 
-    // Select the HTTP-01 challenge
     Challenge? httpChallenge = null;
+    Challenge? dnsChallenge = null;
     foreach (var challenge in authz.Challenges)
     {
       Console.WriteLine($"    Challenge type: {challenge.Type}, status: {challenge.Status}");
+      // Select the HTTP-01 challenge
       if (challenge.Type == "http-01")
         httpChallenge = challenge;
+
+      // Select the DNS-01 challenge
+      if (challenge.Type == "dns-01")
+        dnsChallenge = challenge;
     }
 
     if (httpChallenge != null)
@@ -155,13 +163,16 @@ try
     }
 
     // DNS-01 example
-    var dnsValue = authz.Challenges.Count > 0 && authz.Challenges[0].Token != null
-      ? client.GetDnsChallengeValue(authz.Challenges[0].Token!)
-      : "n/a";
-    var dnsDomain = LakerfieldAcmeClient.GetDnsValidationDomain(authz.Identifier);
-    Console.WriteLine($"  DNS-01 (as alternative):");
-    Console.WriteLine($"    TXT record domain: {dnsDomain}");
-    Console.WriteLine($"    TXT record value:  {dnsValue}");
+    if (dnsChallenge != null)
+    {
+      var dnsValue = dnsChallenge.Token != null
+        ? client.GetDnsChallengeValue(dnsChallenge.Token!)
+        : "n/a";
+      var dnsDomain = LakerfieldAcmeClient.GetDnsValidationDomain(authz.Identifier);
+      Console.WriteLine($"  DNS-01 (as alternative):");
+      Console.WriteLine($"    TXT record domain: {dnsDomain}");
+      Console.WriteLine($"    TXT record value:  {dnsValue}");
+    }
   }
 
   Console.WriteLine();
