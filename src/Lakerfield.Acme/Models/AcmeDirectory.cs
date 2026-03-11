@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Directory object conform RFC 8555 §7.1.1
+/// ACME Directory object as per RFC 8555 §7.1.1
 /// </summary>
 public class AcmeDirectory
 {

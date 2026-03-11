@@ -3,12 +3,12 @@ using System.Collections.Generic;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// Retry Policy helper conform best practices.
+/// Retry policy helper following best practices.
 /// </summary>
 public static class RetryHelper
 {
   /// <summary>
-  /// Default retry config voor ACME calls.
+  /// Default retry configuration for ACME calls.
   /// </summary>
   public static AcmeRetryConfig DefaultRetryPolicy { get; } = new()
   {

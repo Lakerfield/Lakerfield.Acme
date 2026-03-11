@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// JWS Protected Header conform RFC 7515 and ACME specification (RFC 8555 §6.2)
+/// JWS Protected Header as per RFC 7515 and ACME specification (RFC 8555 §6.2)
 /// </summary>
 public class JwsHeader
 {
@@ -43,7 +43,7 @@ public class JwsHeader
 }
 
 /// <summary>
-/// JWK (JSON Web Key) for EC P-256 public key conform RFC 7517
+/// JWK (JSON Web Key) for EC P-256 public key as per RFC 7517
 /// </summary>
 public class EcPublicKeyJwk
 {

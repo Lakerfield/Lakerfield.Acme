@@ -9,23 +9,23 @@ using Lakerfield.Acme.Playground;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 
-// ─── Playground voor Lakerfield.Acme ────────────────────────────────────────
+// ─── Lakerfield.Acme Playground ─────────────────────────────────────────────
 //
-// Dit voorbeeld laat de volledige ACME workflow zien:
-// 1. Account aanmaken
-// 2. Order plaatsen voor een domein
-// 3. Challenge provisionen (HTTP-01)
-// 4. Challenge valideren
-// 5. Certificaat downloaden
+// This example demonstrates the complete ACME workflow:
+// 1. Create an account
+// 2. Place an order for a domain
+// 3. Provision the challenge (HTTP-01)
+// 4. Validate the challenge
+// 5. Download the certificate
 //
 // Let's Encrypt staging server: https://acme-staging-v02.api.letsencrypt.org/directory
-// Let's Encrypt productie server: https://acme-v02.api.letsencrypt.org/directory
+// Let's Encrypt production server: https://acme-v02.api.letsencrypt.org/directory
 //
-// OPMERKING: De minimale ASP.NET Core web app luistert op 0.0.0.0:80 voor HTTP-01 validatie.
-// Op Linux/macOS vereist luisteren op poort 80 verhoogde rechten (bijv. sudo of CAP_NET_BIND_SERVICE).
+// NOTE: The minimal ASP.NET Core web app listens on 0.0.0.0:80 for HTTP-01 validation.
+// On Linux/macOS, listening on port 80 requires elevated privileges (e.g. sudo or CAP_NET_BIND_SERVICE).
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Minimale ASP.NET Core web app voor HTTP-01 challenge hosting ────────────
+// ─── Minimal ASP.NET Core web app for hosting HTTP-01 challenges ─────────────
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddAcmeHttp01Challenge();
 
@@ -41,10 +41,10 @@ Console.WriteLine("Lakerfield.Acme Playground");
 Console.WriteLine("==========================");
 Console.WriteLine();
 
-// Gebruik de in-memory storage implementatie voor deze demo
+// Use the in-memory storage implementation for this demo
 var storage = new InMemoryAcmeStorage();
 
-// Gebruik Let's Encrypt staging voor testing (geen echte certificaten)
+// Use Let's Encrypt staging for testing (no real certificates issued)
 var acmeServerUrl = "https://acme-staging-v02.api.letsencrypt.org/directory";
 
 using var client = new LakerfieldAcmeClient(new HttpClient(), storage);
@@ -55,69 +55,69 @@ Console.WriteLine();
 
 try
 {
-  // Stap 1: Laad de ACME directory
-  Console.WriteLine("Stap 1: Laad ACME directory...");
+  // Step 1: Load the ACME directory
+  Console.WriteLine("Step 1: Loading ACME directory...");
   await client.LoadDirectoryAsync();
   Console.WriteLine($"  newAccount: {client.Directory?.NewAccount}");
   Console.WriteLine($"  newOrder:   {client.Directory?.NewOrder}");
   Console.WriteLine($"  newNonce:   {client.Directory?.NewNonce}");
   Console.WriteLine();
 
-  // Stap 2: Laad bestaand account of maak een nieuw account aan
+  // Step 2: Load an existing account or create a new one
   var keyPath = Path.Combine(Path.GetTempPath(), "acme-account-key.der");
   var accountUrlPath = Path.Combine(Path.GetTempPath(), "acme-account-url.txt");
 
   Account account;
   if (File.Exists(keyPath) && File.Exists(accountUrlPath))
   {
-    Console.WriteLine("Stap 2: Bestaand account laden...");
+    Console.WriteLine("Step 2: Loading existing account...");
     var savedKey = await File.ReadAllBytesAsync(keyPath);
     var savedAccountUrl = await File.ReadAllTextAsync(accountUrlPath);
-    Console.WriteLine($"  Private key geladen: {keyPath}");
-    Console.WriteLine($"  Account URL geladen: {savedAccountUrl}");
+    Console.WriteLine($"  Private key loaded: {keyPath}");
+    Console.WriteLine($"  Account URL loaded: {savedAccountUrl}");
 
     account = await client.LoadAccountAsync(savedAccountUrl, savedKey);
-    Console.WriteLine($"  Account geladen: {account.Url}");
+    Console.WriteLine($"  Account loaded: {account.Url}");
     Console.WriteLine($"  Account status: {account.Status}");
   }
   else
   {
-    Console.WriteLine("Stap 2: Nieuw account aanmaken...");
+    Console.WriteLine("Step 2: Creating new account...");
     var privateKey = client.GenerateAccountKey();
-    Console.WriteLine($"  EC P-256 private key gegenereerd ({privateKey.Length} bytes)");
+    Console.WriteLine($"  EC P-256 private key generated ({privateKey.Length} bytes)");
 
     account = await client.CreateAccountAsync(email: "admin@example.com");
-    Console.WriteLine($"  Account aangemaakt: {account.Url}");
+    Console.WriteLine($"  Account created: {account.Url}");
     Console.WriteLine($"  Account status: {account.Status}");
 
-    // Sla de private key en account URL op voor later gebruik
+    // Save the private key and account URL for later use
     await File.WriteAllBytesAsync(keyPath, privateKey);
     await File.WriteAllTextAsync(accountUrlPath, account.Url);
-    Console.WriteLine($"  Private key opgeslagen: {keyPath}");
-    Console.WriteLine($"  Account URL opgeslagen: {accountUrlPath}");
+    Console.WriteLine($"  Private key saved: {keyPath}");
+    Console.WriteLine($"  Account URL saved: {accountUrlPath}");
   }
 
   Console.WriteLine();
 
-  // Stap 3: Maak een order aan voor een domein
+  // Step 3: Create an order for a domain
   var domain = "example.com";
-  Console.WriteLine($"Stap 3: Order aanmaken voor {domain}...");
+  Console.WriteLine($"Step 3: Creating order for {domain}...");
   var order = await client.CreateOrderAsync(domain);
   Console.WriteLine($"  Order URL: {order.Url}");
   Console.WriteLine($"  Order status: {order.Status}");
   Console.WriteLine($"  Authorizations: {order.Authorizations.Count}");
   Console.WriteLine();
 
-  // Stap 4: Verwerk elke authorization
-  Console.WriteLine("Stap 4: Authorizations verwerken...");
+  // Step 4: Process each authorization
+  Console.WriteLine("Step 4: Processing authorizations...");
   foreach (var authzUrl in order.Authorizations)
   {
     Console.WriteLine($"  Authorization: {authzUrl}");
     var authz = await client.GetAuthorizationAsync(authzUrl);
-    Console.WriteLine($"  Domein: {authz.Identifier}");
+    Console.WriteLine($"  Domain: {authz.Identifier}");
     Console.WriteLine($"  Status: {authz.Status}");
 
-    // Kies de HTTP-01 challenge
+    // Select the HTTP-01 challenge
     Challenge? httpChallenge = null;
     foreach (var challenge in authz.Challenges)
     {
@@ -138,66 +138,66 @@ try
       Console.WriteLine($"    Key Authorization: {keyAuthValue}");
       Console.WriteLine($"    URL: {challengeUrl}");
       Console.WriteLine();
-      Console.WriteLine($"  Token geregistreerd op de lokale web app:");
+      Console.WriteLine($"  Token registered on the local web app:");
       Console.WriteLine($"    http://{authz.Identifier}/.well-known/acme-challenge/{token}");
       Console.WriteLine();
 
-      // Registreer de token in de lokale web app zodat de ACME server hem kan ophalen.
+      // Register the token with the local web app so the ACME server can fetch it.
       tokenStore.AddToken(token, keyAuthValue);
 
-      Console.WriteLine($"  Challenge valideren...");
+      Console.WriteLine($"  Validating challenge...");
       await client.ValidateChallengeAsync(httpChallenge.Url!);
-      Console.WriteLine($"  Wachten op challenge validatie...");
+      Console.WriteLine($"  Waiting for challenge validation...");
       var validatedChallenge = await client.WaitForChallengeValidAsync(httpChallenge.Url!);
       Console.WriteLine($"  Challenge status: {validatedChallenge.Status}");
 
       tokenStore.RemoveToken(token);
     }
 
-    // DNS-01 voorbeeld
+    // DNS-01 example
     var dnsValue = authz.Challenges.Count > 0 && authz.Challenges[0].Token != null
       ? client.GetDnsChallengeValue(authz.Challenges[0].Token!)
       : "n/a";
     var dnsDomain = LakerfieldAcmeClient.GetDnsValidationDomain(authz.Identifier);
-    Console.WriteLine($"  DNS-01 (als alternatief):");
-    Console.WriteLine($"    TXT record domein: {dnsDomain}");
-    Console.WriteLine($"    TXT record waarde: {dnsValue}");
+    Console.WriteLine($"  DNS-01 (as alternative):");
+    Console.WriteLine($"    TXT record domain: {dnsDomain}");
+    Console.WriteLine($"    TXT record value:  {dnsValue}");
   }
 
   Console.WriteLine();
-  Console.WriteLine("Stap 5: Certificaat aanvragen en downloaden...");
+  Console.WriteLine("Step 5: Requesting and downloading certificate...");
 
-  Console.WriteLine("  Wachten tot order 'ready' is...");
+  Console.WriteLine("  Waiting for order to become 'ready'...");
   var readyOrder = await client.WaitForOrderReadyAsync(order.Url!);
   Console.WriteLine($"  Order status: {readyOrder.Status}");
 
-  Console.WriteLine("  Order finaliseren (CSR indienen)...");
+  Console.WriteLine("  Finalizing order (submitting CSR)...");
   var (pendingOrder, certPrivateKey) = await client.FinalizeOrderAsync(readyOrder, new[] { domain });
-  Console.WriteLine($"  Order status na finaliseren: {pendingOrder.Status}");
+  Console.WriteLine($"  Order status after finalize: {pendingOrder.Status}");
 
-  Console.WriteLine("  Wachten tot order 'valid' is...");
+  Console.WriteLine("  Waiting for order to become 'valid'...");
   var validOrder = await client.WaitForOrderValidAsync(pendingOrder.Url!);
   Console.WriteLine($"  Order status: {validOrder.Status}");
 
-  Console.WriteLine("  Certificaat downloaden...");
+  Console.WriteLine("  Downloading certificate...");
   var pem = await client.DownloadCertificateAsync(validOrder);
   Console.WriteLine();
-  Console.WriteLine("─── PEM Certificaat ────────────────────────────────────────────────────────");
+  Console.WriteLine("─── PEM Certificate ────────────────────────────────────────────────────────");
   Console.WriteLine(pem);
   Console.WriteLine("────────────────────────────────────────────────────────────────────────────");
   Console.WriteLine();
-  Console.WriteLine("Demo succesvol afgerond!");
+  Console.WriteLine("Demo completed successfully!");
 }
 catch (AcmeException ex)
 {
   Console.ForegroundColor = ConsoleColor.Red;
-  Console.WriteLine($"ACME Fout: {ex.Message}");
+  Console.WriteLine($"ACME Error: {ex.Message}");
   Console.ResetColor();
 }
 catch (Exception ex)
 {
   Console.ForegroundColor = ConsoleColor.Red;
-  Console.WriteLine($"Fout: {ex.GetType().Name}: {ex.Message}");
+  Console.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
   Console.ResetColor();
 }
 finally
@@ -205,11 +205,11 @@ finally
   await webApp.StopAsync();
 }
 
-// ─── In-Memory Storage implementatie ────────────────────────────────────────
+// ─── In-Memory Storage implementation ───────────────────────────────────────
 
 /// <summary>
-/// Eenvoudige in-memory implementatie van IAcmeStorage voor demo doeleinden.
-/// In productie gebruik je MongoDB, disk, of een andere persistente storage.
+/// Simple in-memory implementation of IAcmeStorage for demo purposes.
+/// In production, use MongoDB, disk, or another persistent storage backend.
 /// </summary>
 class InMemoryAcmeStorage : IAcmeStorage
 {

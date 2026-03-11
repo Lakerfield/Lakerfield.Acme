@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Order object conform RFC 8555 §7.1.3
+/// ACME Order object as per RFC 8555 §7.1.3
 /// </summary>
 public class AcmeOrder
 {
