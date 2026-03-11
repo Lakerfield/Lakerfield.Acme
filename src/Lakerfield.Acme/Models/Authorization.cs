@@ -17,6 +17,7 @@ public class Authorization
   /// <summary>
   /// Domain name (convenience accessor for IdentifierObj.Value)
   /// </summary>
+  [JsonIgnore]
   public string Identifier => IdentifierObj?.Value ?? string.Empty;
 
   /// <summary>

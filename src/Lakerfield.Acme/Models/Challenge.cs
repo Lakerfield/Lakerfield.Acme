@@ -40,6 +40,7 @@ public class Challenge
   /// <summary>
   /// Convenience accessor for error message
   /// </summary>
+  [JsonIgnore]
   public string? ErrorMessage => AcmeError?.Detail;
 
   /// <summary>
