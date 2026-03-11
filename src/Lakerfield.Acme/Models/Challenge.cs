@@ -1,66 +1,56 @@
-using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Challenge object conform RFC 8555 §3 and §6
+/// ACME Challenge object conform RFC 8555 §7.1.5
 /// </summary>
 public class Challenge
 {
   /// <summary>
-  /// Unique identifier for this challenge
+  /// Validation method: "http-01", "dns-01", or "tls-alpn-01"
   /// </summary>
-  public string Id { get; set; } = default!;
-
-  /// <summary>
-  /// Validation method: "http-01", "dns-01", "tls-alpn-01"
-  /// </summary>
+  [JsonPropertyName("type")]
   public string Type { get; set; } = default!;
 
   /// <summary>
-  /// Status: "pending", "processing", "valid", "invalid", or "ready"
+  /// Status: "pending", "processing", "valid", or "invalid"
   /// </summary>
+  [JsonPropertyName("status")]
   public string Status { get; set; } = "pending";
 
   /// <summary>
-  /// URL to check for challenge response (HTTP-01 only)
+  /// URL to POST to trigger validation
   /// </summary>
+  [JsonPropertyName("url")]
   public string Url { get; set; } = default!;
 
   /// <summary>
-  /// Token value for HTTP-01 or DNS-01 challenges
+  /// Token value used to construct the key authorization
   /// </summary>
+  [JsonPropertyName("token")]
   public string? Token { get; set; }
 
   /// <summary>
-  /// Value to provision (HTTP response body or DNS TXT record)
+  /// Error details if the challenge failed
   /// </summary>
-  public string? ExpectedValue { get; set; }
+  [JsonPropertyName("error")]
+  public AcmeError? AcmeError { get; set; }
 
   /// <summary>
-  /// Actual value returned by the server after validation
+  /// Convenience accessor for error message
   /// </summary>
-  public string? ValidationRecord { get; set; }
+  public string? ErrorMessage => AcmeError?.Detail;
 
   /// <summary>
-  /// Error description if challenge failed (optional in response)
+  /// Key authorization value (token + "." + JWK thumbprint), computed locally
   /// </summary>
-  public string? Error { get; set; }
+  public string? KeyAuthorization { get; set; }
 
   /// <summary>
-  /// URL to check challenge status
-  /// </summary>
-  public string UrlPath { get; set; } = default!;
-
-  /// <summary>
-  /// Validation domain for DNS challenges (e.g., _acme-challenge.example.com)
+  /// Validation domain for DNS-01 challenges (e.g., _acme-challenge.example.com)
   /// </summary>
   public string? ValidationDomain { get; set; }
-
-  /// <summary>
-  /// For tls-alpn-01: list of protocol names the server should negotiate
-  /// </summary>
-  public List<string>? AlpnProtocols { get; set; } = new() { "acme-tls/1" };
 }
 
 /// <summary>
@@ -76,7 +66,7 @@ public enum ChallengeStatus
 }
 
 /// <summary>
-/// Type van ACME challenge.
+/// Type of ACME challenge.
 /// </summary>
 public enum ChallengeType
 {

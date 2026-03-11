@@ -1,42 +1,50 @@
+using System.Collections.Generic;
+using System.Text.Json.Serialization;
+
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Account object conform RFC 8555 §6
+/// ACME Account object conform RFC 8555 §7.1.2
 /// </summary>
 public class Account
 {
   /// <summary>
-  /// Unique identifier for this account
+  /// Unique identifier for this account (local, not from ACME server)
   /// </summary>
   public string Id { get; set; } = default!;
 
   /// <summary>
-  /// Email address for notifications (optional, may be restricted)
+  /// Contact email addresses (e.g., ["mailto:admin@example.com"])
   /// </summary>
-  public string? Contact { get; set; }
+  [JsonPropertyName("contact")]
+  public List<string>? Contact { get; set; }
 
   /// <summary>
-  /// Status: "valid", "invalid", or "deactivated"
+  /// Status: "valid", "deactivated", or "revoked"
   /// </summary>
+  [JsonPropertyName("status")]
   public string Status { get; set; } = "valid";
 
   /// <summary>
-  /// Unix timestamp when the account was created
+  /// Whether the client has agreed to the terms of service
   /// </summary>
-  public int CreatedAt { get; set; }
+  [JsonPropertyName("termsOfServiceAgreed")]
+  public bool? TermsOfServiceAgreed { get; set; }
 
   /// <summary>
-  /// Public key JWK for this account
+  /// URL to list the orders for this account
   /// </summary>
-  public string Key { get; set; } = default!;
+  [JsonPropertyName("orders")]
+  public string? Orders { get; set; }
 
   /// <summary>
-  /// True if the account is being used for pending authorizations
+  /// Public key JWK for this account (returned by server)
   /// </summary>
-  public bool? Enabled { get; set; }
+  [JsonPropertyName("key")]
+  public object? Key { get; set; }
 
   /// <summary>
-  /// Directory URL for this account
+  /// Account URL (from Location header, used as kid in subsequent requests)
   /// </summary>
   public string Url { get; set; } = default!;
 }

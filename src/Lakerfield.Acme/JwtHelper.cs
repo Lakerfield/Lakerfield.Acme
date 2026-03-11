@@ -1,35 +1,25 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Lakerfield.Acme.Models;
 
 namespace Lakerfield.Acme;
 
 /// <summary>
-/// Helper voor base64url encoding en JWS signing.
+/// Helper voor JWS (JSON Web Signature) operations conform RFC 7515 en RFC 8555.
+/// Implementeert ECDSA P-256 (ES256) signing zonder externe dependencies.
 /// </summary>
 public static class JwtHelper
 {
-  /// <summary>
-  /// Bereken base64url encoding van header JSON conform RFC 7515.
-  /// </summary>
-  public static string EncodeHeader(JwsHeaderExtensions header)
+  private static readonly JsonSerializerOptions _jsonOptions = new()
   {
-    var json = System.Text.Json.JsonSerializer.Serialize(header, new System.Text.Json.JsonSerializerOptions
-    {
-      WriteIndented = false
-    });
-
-    return Encode(Encoding.UTF8.GetBytes(json));
-  }
+    WriteIndented = false,
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+  };
 
   /// <summary>
-  /// Bereken base64url encoding van payload string.
-  /// </summary>
-  public static string Encode(string payload) => Encode(Encoding.UTF8.GetBytes(payload));
-
-  /// <summary>
-  /// Bereken base64url encoding van byte array (strip padding, URL-safe).
+  /// Bereken base64url encoding van byte array conform RFC 7515 §2.
   /// </summary>
   public static string Encode(byte[] data)
   {
@@ -40,79 +30,139 @@ public static class JwtHelper
   }
 
   /// <summary>
-  /// Decode base64url string back to bytes.
+  /// Bereken base64url encoding van string (als UTF-8 bytes).
+  /// </summary>
+  public static string Encode(string payload) => Encode(Encoding.UTF8.GetBytes(payload));
+
+  /// <summary>
+  /// Decode base64url string terug naar bytes.
   /// </summary>
   public static byte[] Decode(string encoded)
   {
-    // Convert back to standard base64 with padding
-    string base64 = AddPadding(encoded);
+    string base64 = encoded
+      .Replace('-', '+')
+      .Replace('_', '/');
+
+    int remainder = base64.Length % 4;
+    if (remainder == 2)
+      base64 += "==";
+    else if (remainder == 3)
+      base64 += "=";
 
     return Convert.FromBase64String(base64);
   }
 
   /// <summary>
-  /// Add padding to base64url string.
+  /// Bereken de JWK thumbprint van een EC P-256 public key conform RFC 7638.
+  /// De canonical JSON is: {"crv":"P-256","kty":"EC","x":"...","y":"..."} (keys gesorteerd).
   /// </summary>
-  private static string AddPadding(string encoded)
+  public static string ComputeJwkThumbprint(ECDsa ecKey)
   {
-    int remainder = encoded.Length % 4;
-    if (remainder == 0) return encoded;
-    if (remainder == 1) throw new System.Exception("Invalid base64url encoding");
-    if (remainder == 2) return encoded + "==";
-    return encoded + "=";
+    var parameters = ecKey.ExportParameters(includePrivateParameters: false);
+    var x = Encode(parameters.Q.X!);
+    var y = Encode(parameters.Q.Y!);
+
+    // RFC 7638: canonical JSON met keys lexicografisch gesorteerd
+    var canonicalJson = $"{{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"{x}\",\"y\":\"{y}\"}}";
+    var thumbprintBytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonicalJson));
+    return Encode(thumbprintBytes);
   }
 
   /// <summary>
-  /// Bereken ECDSA signature voor payload bytes.
-  /// Voor nu placeholder - in productie met BouncyCastle.
+  /// Maak een EcPublicKeyJwk object van een EC P-256 key.
   /// </summary>
-  public static byte[] SignWithEcSha256(byte[] privateKeyBytes, byte[] payload)
+  public static EcPublicKeyJwk ToPublicKeyJwk(ECDsa ecKey)
   {
-    // Placeholder implementation - use BouncyCastle for production
-    throw new NotImplementedException("ECDSA P-256 signing requires BouncyCastle NuGet package");
+    var parameters = ecKey.ExportParameters(includePrivateParameters: false);
+    return new EcPublicKeyJwk
+    {
+      X = Encode(parameters.Q.X!),
+      Y = Encode(parameters.Q.Y!),
+    };
   }
 
   /// <summary>
-  /// Bereken signature voor string payload.
+  /// Bereken de key authorization voor een ACME challenge token conform RFC 8555 §8.1.
+  /// keyAuthorization = token + "." + base64url(SHA256(canonicalJwkJson))
   /// </summary>
-  public static byte[] SignWithEcSha256(string privateKeyBase64, string payload)
+  public static string ComputeKeyAuthorization(string token, ECDsa ecKey)
   {
-    return SignWithEcSha256(Convert.FromBase64String(privateKeyBase64), Encoding.UTF8.GetBytes(payload));
+    var thumbprint = ComputeJwkThumbprint(ecKey);
+    return $"{token}.{thumbprint}";
   }
 
   /// <summary>
-  /// Bereken ECDSA signature van JSON payload.
+  /// Bereken de DNS-01 challenge waarde conform RFC 8555 §8.4.
+  /// dns01Value = base64url(SHA256(keyAuthorization))
   /// </summary>
-  public static byte[] SignWithEcSha256(string jsonPayload)
+  public static string ComputeDns01Value(string keyAuthorization)
   {
-    return SignWithEcSha256(Convert.FromBase64String("PLACEHOLDER"), Encoding.UTF8.GetBytes(jsonPayload));
+    var digestBytes = SHA256.HashData(Encoding.UTF8.GetBytes(keyAuthorization));
+    return Encode(digestBytes);
   }
 
   /// <summary>
-  /// Creer complete JWS string conform RFC 7515.
-  /// Format: base64url(protected_header).base64url(payload).base64url(signature)
+  /// Maak een geserialiseerde JWS JSON string voor een ACME POST request.
+  /// Gebruikt de JWK (public key) in de header - voor new-account en revokeCert.
   /// </summary>
-  public static string CreateJws(JwsHeaderExtensions header, string payload)
+  public static string CreateJwsWithJwk(ECDsa ecKey, string nonce, string url, string? payloadJson)
   {
-    var protectedPart = EncodeHeader(header);
-    var payloadPart = Encode(payload);
-
-    // Placeholder signature for development - use real signing in production
-    byte[] placeholderSignature = System.Text.Encoding.UTF8.GetBytes("PHOTOGRAPHY-012345");
-
-    return
-      $"{protectedPart}.{payloadPart}.base64url({Convert.ToBase64String(placeholderSignature).TrimEnd('=').Replace('+', '-').Replace('/', '_')})";
+    var jwk = ToPublicKeyJwk(ecKey);
+    var header = new JwsHeader
+    {
+      Alg = "ES256",
+      Jwk = jwk,
+      Nonce = nonce,
+      Url = url,
+    };
+    return SignJws(ecKey, header, payloadJson);
   }
 
   /// <summary>
-  /// Placeholder JWS creation.
+  /// Maak een geserialiseerde JWS JSON string voor een ACME POST request.
+  /// Gebruikt het account URL als kid - voor alle requests na account aanmaken.
   /// </summary>
-  public static string CreatePlaceholderJws(JwsHeaderExtensions header, string payload)
+  public static string CreateJwsWithKid(ECDsa ecKey, string accountUrl, string nonce, string url, string? payloadJson)
   {
-    var protectedPart = EncodeHeader(header);
-    var payloadPart = Encode(payload);
+    var header = new JwsHeader
+    {
+      Alg = "ES256",
+      Kid = accountUrl,
+      Nonce = nonce,
+      Url = url,
+    };
+    return SignJws(ecKey, header, payloadJson);
+  }
 
-    // Simple placeholder - real implementation uses ECDSA signing
-    return $"{protectedPart}.{payloadPart}.SIGNATURE_PLACEHOLDER";
+  /// <summary>
+  /// Bereken header JSON conform RFC 7515.
+  /// </summary>
+  public static string EncodeHeader(JwsHeaderExtensions header)
+  {
+    var json = JsonSerializer.Serialize(header, _jsonOptions);
+    return Encode(Encoding.UTF8.GetBytes(json));
+  }
+
+  private static string SignJws(ECDsa ecKey, JwsHeader header, string? payloadJson)
+  {
+    var headerJson = JsonSerializer.Serialize(header, _jsonOptions);
+    var protectedB64 = Encode(Encoding.UTF8.GetBytes(headerJson));
+
+    // POST-as-GET gebruikt leeg payload; reguliere POSTs gebruiken base64url(json)
+    var payloadB64 = payloadJson == null ? string.Empty : Encode(Encoding.UTF8.GetBytes(payloadJson));
+
+    var signingInput = Encoding.UTF8.GetBytes($"{protectedB64}.{payloadB64}");
+
+    // ECDSA P-256 signing met IEEE P1363 formaat (r || s, geen DER ASN.1)
+    var signatureBytes = ecKey.SignData(signingInput, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+    var signatureB64 = Encode(signatureBytes);
+
+    // JSON FlattenedSerialization conform RFC 7515 §7.2.2 / RFC 8555 §6.2
+    return JsonSerializer.Serialize(new
+    {
+      @protected = protectedB64,
+      payload = payloadB64,
+      signature = signatureB64,
+    });
   }
 }

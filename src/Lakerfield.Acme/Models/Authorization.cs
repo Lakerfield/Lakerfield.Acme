@@ -1,45 +1,50 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Authorization object conform RFC 8555 §4
+/// ACME Authorization object conform RFC 8555 §7.1.4
 /// </summary>
 public class Authorization
 {
   /// <summary>
-  /// Unique identifier for this authorization
+  /// The domain identifier being authorized
   /// </summary>
-  public string Id { get; set; } = default!;
+  [JsonPropertyName("identifier")]
+  public AcmeIdentifier? IdentifierObj { get; set; }
 
   /// <summary>
-  /// The domain name being validated (e.g., "example.com", "www.example.com")
+  /// Domain name (convenience accessor for IdentifierObj.Value)
   /// </summary>
-  public string Identifier { get; set; } = default!;
+  public string Identifier => IdentifierObj?.Value ?? string.Empty;
 
   /// <summary>
-  /// Whether the authorization is being used for pending challenges
+  /// Status: "pending", "valid", "invalid", "deactivated", "expired", or "revoked"
   /// </summary>
-  public bool? IsPrimary { get; set; }
-
-  /// <summary>
-  /// Status: "valid", "invalid", or "pending"
-  /// </summary>
+  [JsonPropertyName("status")]
   public string Status { get; set; } = "pending";
 
   /// <summary>
-  /// The challenge type to use for validation
-  /// Options: "http-01", "dns-01", "tls-alpn-01"
+  /// Expiry timestamp (RFC 3339 format)
   /// </summary>
-  public string[]? ChallengeType { get; set; }
+  [JsonPropertyName("expires")]
+  public string? Expires { get; set; }
 
   /// <summary>
   /// List of challenges associated with this authorization
   /// </summary>
+  [JsonPropertyName("challenges")]
   public List<Challenge> Challenges { get; set; } = new();
 
   /// <summary>
-  /// URL to check this authorization's status
+  /// Whether this is a wildcard authorization
   /// </summary>
-  public string UrlPath { get; set; } = default!;
+  [JsonPropertyName("wildcard")]
+  public bool? Wildcard { get; set; }
+
+  /// <summary>
+  /// Authorization URL (set after fetching)
+  /// </summary>
+  public string? Url { get; set; }
 }

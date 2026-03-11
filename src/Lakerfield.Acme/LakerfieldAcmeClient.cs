@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Lakerfield.Acme.Models;
 
@@ -19,27 +21,32 @@ public class LakerfieldAcmeClient : IDisposable
   private readonly HttpClient _httpClient;
   private readonly IAcmeStorage _storage;
   private readonly AcmeRetryConfig _retryPolicy;
+
+  private AcmeDirectory? _directory;
+  private ECDsa? _accountKey;
+  private string? _nonce;
   private Account? _account;
 
+  private static readonly JsonSerializerOptions _jsonOptions = new()
+  {
+    PropertyNameCaseInsensitive = true,
+    WriteIndented = false,
+  };
+
   /// <summary>
-  /// ACME directory URL (standard: Let's Encrypt)
+  /// ACME directory URL (standaard: Let's Encrypt productie)
   /// </summary>
   public string AcmeServerUrl { get; set; } = "https://acme-v02.api.letsencrypt.org/directory";
 
   /// <summary>
-  /// Loaded ACME account na aanmaken.
+  /// Huidig geladen ACME account.
   /// </summary>
   public Account? Account => _account;
 
   /// <summary>
-  /// Current authorization met Challenges.
+  /// Parsed ACME directory met endpoint URLs.
   /// </summary>
-  public Authorization? Authorization { get; private set; }
-
-  /// <summary>
-  /// List van active challenges.
-  /// </summary>
-  public Dictionary<string, Challenge> Challenges { get; } = new();
+  public AcmeDirectory? Directory => _directory;
 
   public LakerfieldAcmeClient(HttpClient httpClient, IAcmeStorage storage, AcmeRetryConfig? retryPolicy = null)
   {
@@ -47,497 +54,644 @@ public class LakerfieldAcmeClient : IDisposable
     _storage = storage ?? throw new ArgumentNullException(nameof(storage));
     _retryPolicy = retryPolicy ?? RetryHelper.DefaultRetryPolicy;
 
-    // Configure user agent
     _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Lakerfield.Acme", "1.0"));
-    _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue($"DotNet/{Environment.Version}"));
-
-    // Load directory URL op
-    LoadDirectoryAsync().GetAwaiter().GetResult();
+    _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("DotNet", Environment.Version.ToString()));
   }
 
   /// <summary>
-  /// Factory methode zonder explicit HttpClient - gebruikt default.
+  /// Factory methode zonder explicit HttpClient - gebruikt default HttpClient.
   /// </summary>
-  public LakerfieldAcmeClient(IAcmeStorage storage, AcmeRetryConfig? retryPolicy = null) : this(new HttpClient(),
-    storage, retryPolicy)
+  public LakerfieldAcmeClient(IAcmeStorage storage, AcmeRetryConfig? retryPolicy = null)
+    : this(new HttpClient(), storage, retryPolicy)
   {
   }
 
+  // ─── Directory & Nonce ───────────────────────────────────────────────────
+
   /// <summary>
-  /// Load ACME directory endpoint.
+  /// Laad ACME directory endpoint en parseer de endpoint URLs.
+  /// Moet aangeroepen worden voor het gebruik van de client.
   /// </summary>
   public async Task LoadDirectoryAsync()
   {
-    try
-    {
-      var response = await _httpClient.GetAsync(string.Empty).ConfigureAwait(false);
-
-      if (!response.IsSuccessStatusCode)
-      {
-        throw new HttpRequestException($"Failed to connect to ACME server at {AcmeServerUrl}");
-      }
-
-      _httpClient.BaseAddress = new Uri(AcmeServerUrl);
-    }
-    catch (Exception ex)
-    {
-      throw new Exception("Failed to load ACME directory", ex);
-    }
-  }
-
-  /// <summary>
-  /// Create new account met private key.
-  /// </summary>
-  public async Task<Account> CreateAccountAsync(byte[] privateKeyBytes)
-  {
-    // Generate EC P-256 private key JWK (voor nu placeholder)
-    string privateKeyJwk = GeneratePrivateKeys(privateKeyBytes);
-
-    var jwsHeader = new JwsHeaderExtensions
-    {
-      Alg = "ES256",
-      Kid = AcmeServerUrl,
-      Url = $"{AcmeServerUrl}/new-account"
-    };
-
-    return await CreateAccountWithJwsAsync(jwsHeader, privateKeyJwk)
-      .ConfigureAwait(false);
-  }
-
-  /// <summary>
-  /// Generate random EC P-256 private key.
-  /// </summary>
-  public async Task<Account> CreateAccountAsync()
-  {
-    using var rng = RandomNumberGenerator.Create();
-    byte[] privateKey = new byte[32]; // P-256 is 32 bytes
-    rng.GetBytes(privateKey);
-
-    return await CreateAccountAsync(privateKey).ConfigureAwait(false);
-  }
-
-  /// <summary>
-  /// Generate random RSA private key (2048 bits).
-  /// </summary>
-  public async Task<Account> CreateAccountWithRsaAsync()
-  {
-    using var rsa = RSA.Create(2048);
-    byte[] privateKeyDer = EncodePrivateKey(rsa.ExportRSAPrivateKey());
-
-    return await CreateAccountAsync(privateKeyDer).ConfigureAwait(false);
-  }
-
-  private string GeneratePrivateKeys(byte[] privateKeyBytes)
-  {
-    // Placeholder - echte JWK generatie met BouncyCastle of Microsoft.IdentityModel
-    throw new NotImplementedException(
-      "JWK generation vereist BouncyCastle NuGet package voor volledige ondersteuning.");
-  }
-
-  /// <summary>
-  /// Create account response placeholder.
-  /// </summary>
-  private Task<Account> CreateAccountWithJwsAsync(JwsHeaderExtensions header, string privateKeyJwk)
-  {
-    throw new NotImplementedException("Account creation requires full JWS implementation");
-  }
-
-  private byte[] EncodePrivateKey(byte[] privateKeyBytes)
-  {
-    // Placeholder - return as is
-    return privateKeyBytes;
-  }
-
-  /// <summary>
-  /// Request authorization for domain.
-  /// </summary>
-  public async Task<Authorization> RequestAuthorizationAsync(string domain)
-  {
-    var jwsHeader = CreateJwsHeader();
-
-    using var requestContent =
-      new StringContent(JwtHelper.Encode($"{{\"identifier\":{{\"value\":\"{domain}\"}}}}"), Encoding.UTF8,
-        "application/json")
-      {
-        Headers =
-        {
-          ContentType = MediaTypeHeaderValue.Parse("application/jose+json")
-        }
-      };
-
-    var response = await _httpClient.PostAsync(string.Empty, requestContent).ConfigureAwait(false);
+    var response = await _httpClient.GetAsync(AcmeServerUrl).ConfigureAwait(false);
 
     if (!response.IsSuccessStatusCode)
-    {
-      throw new AcmeException($"Failed to request authorization: {response.StatusCode}");
-    }
-
-    // Parse authorization from Location header
-    string authzUrl = ExtractAuthorizationUrl(response.Headers.Location?.AbsoluteUri);
-
-    var responseContent = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-    var authorization = JsonSerializer.Deserialize<Authorization>(responseContent)!;
-
-    Authorization = authorization;
-    return authorization;
-  }
-
-  /// <summary>
-  /// Get authorization by ID.
-  /// </summary>
-  private async Task<Authorization> GetAuthorizationAsync(string authzId)
-  {
-    var response = await _httpClient.GetAsync($"authz/{authzId}").ConfigureAwait(false);
-
-    if (!response.IsSuccessStatusCode)
-    {
-      throw new AcmeException($"Failed to get authorization: {response.StatusCode}");
-    }
+      throw new AcmeException($"Failed to load ACME directory from {AcmeServerUrl}: {response.StatusCode}");
 
     var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-    return JsonSerializer.Deserialize<Authorization>(content)!;
+    _directory = JsonSerializer.Deserialize<AcmeDirectory>(content, _jsonOptions)
+      ?? throw new AcmeException("Failed to parse ACME directory response");
+
+    // Extraheer een nonce uit de response als die er is
+    if (response.Headers.TryGetValues("Replay-Nonce", out var nonceValues))
+    {
+      foreach (var nonce in nonceValues)
+      {
+        _nonce = nonce;
+        break;
+      }
+    }
   }
 
   /// <summary>
-  /// Get challenge by ID.
+  /// Haal een nieuwe nonce op van de ACME server (HEAD request op newNonce endpoint).
   /// </summary>
-  private async Task<Challenge> GetChallengeAsync(string challId)
+  private async Task<string> GetNonceAsync()
   {
-    // Challenge URL is typically within authorization
-    string challengeUrl = Authorization != null
-      ? $"{AcmeServerUrl}/authz/{Authorization.Id}/chall/{challId}"
-      : $"{AcmeServerUrl}/chall/{challId}";
+    if (_directory == null)
+      throw new InvalidOperationException("Directory not loaded. Call LoadDirectoryAsync() first.");
 
-    var response = await _httpClient.GetAsync(challengeUrl).ConfigureAwait(false);
+    var response = await _httpClient.SendAsync(
+      new HttpRequestMessage(HttpMethod.Head, _directory.NewNonce)).ConfigureAwait(false);
 
-    if (!response.IsSuccessStatusCode)
+    if (response.Headers.TryGetValues("Replay-Nonce", out var values))
     {
-      throw new AcmeException($"Failed to get challenge: {response.StatusCode}");
+      foreach (var nonce in values)
+        return nonce;
     }
 
-    var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-    return JsonSerializer.Deserialize<Challenge>(content)!;
+    throw new AcmeException("ACME server did not return a Replay-Nonce header");
   }
 
   /// <summary>
-  /// Get authorization for domain (if already requested).
+  /// Haal de huidige nonce op (hergebruik of vraag een nieuwe op).
   /// </summary>
-  public async Task<Authorization> RequestAuthorizationForDomainAsync(string domain)
+  private async Task<string> ConsumeNonceAsync()
   {
-    // Try to get from storage first, then request if not found
-    var account = Account;
+    if (_nonce != null)
+    {
+      var n = _nonce;
+      _nonce = null;
+      return n;
+    }
+    return await GetNonceAsync().ConfigureAwait(false);
+  }
 
-    // Parse domain from identifier
-    string? authorizationId = await GenerateAuthorizationId(account!.Id, domain);
+  // ─── Account management ──────────────────────────────────────────────────
+
+  /// <summary>
+  /// Genereer een nieuw EC P-256 sleutelpaar en sla de private key op.
+  /// Retourneert de PKCS#8 DER-encoded private key bytes.
+  /// </summary>
+  public byte[] GenerateAccountKey()
+  {
+    _accountKey?.Dispose();
+    _accountKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    return _accountKey.ExportPkcs8PrivateKey();
+  }
+
+  /// <summary>
+  /// Laad een bestaande EC P-256 private key (PKCS#8 DER-encoded).
+  /// </summary>
+  public void LoadAccountKey(byte[] pkcs8PrivateKey)
+  {
+    _accountKey?.Dispose();
+    _accountKey = ECDsa.Create();
+    _accountKey.ImportPkcs8PrivateKey(pkcs8PrivateKey, out _);
+  }
+
+  /// <summary>
+  /// Maak een nieuw ACME account aan met een gegenereerde EC P-256 key.
+  /// Optioneel kan een email adres opgegeven worden voor notificaties.
+  /// </summary>
+  /// <param name="email">Optioneel email adres voor Let's Encrypt notificaties</param>
+  /// <param name="termsOfServiceAgreed">True om akkoord te gaan met de ToS (vereist door Let's Encrypt)</param>
+  /// <returns>Het aangemaakte Account object met URL</returns>
+  public async Task<Account> CreateAccountAsync(string? email = null, bool termsOfServiceAgreed = true)
+  {
+    EnsureDirectoryLoaded();
+    EnsureAccountKeyLoaded();
+
+    var payload = new Dictionary<string, object>
+    {
+      ["termsOfServiceAgreed"] = termsOfServiceAgreed,
+    };
+
+    if (email != null)
+      payload["contact"] = new[] { $"mailto:{email}" };
+
+    var payloadJson = JsonSerializer.Serialize(payload, _jsonOptions);
+    var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+    var jwsBody = JwtHelper.CreateJwsWithJwk(_accountKey!, nonce, _directory!.NewAccount, payloadJson);
+
+    var response = await PostJwsAsync(_directory.NewAccount, jwsBody).ConfigureAwait(false);
+
+    var accountJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+    var account = JsonSerializer.Deserialize<Account>(accountJson, _jsonOptions)
+      ?? throw new AcmeException("Failed to parse account response");
+
+    // Account URL zit in de Location header
+    account.Url = response.Headers.Location?.AbsoluteUri
+      ?? throw new AcmeException("ACME server did not return account URL in Location header");
+    account.Id = account.Url;
+
+    // Sla de nonce op voor het volgende request
+    ExtractNonce(response);
+
+    _account = account;
+    return account;
+  }
+
+  /// <summary>
+  /// Laad een bestaand ACME account op basis van een account URL en private key.
+  /// </summary>
+  /// <param name="accountUrl">Account URL (bijv. https://acme-v02.api.letsencrypt.org/acme/acct/123)</param>
+  /// <param name="pkcs8PrivateKey">PKCS#8 DER-encoded private key</param>
+  public async Task<Account> LoadAccountAsync(string accountUrl, byte[] pkcs8PrivateKey)
+  {
+    EnsureDirectoryLoaded();
+    LoadAccountKey(pkcs8PrivateKey);
+
+    // POST-as-GET om account info op te halen
+    var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+    var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, accountUrl, nonce, accountUrl, null);
+
+    var response = await PostJwsAsync(accountUrl, jwsBody).ConfigureAwait(false);
+
+    var accountJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+    var account = JsonSerializer.Deserialize<Account>(accountJson, _jsonOptions)
+      ?? throw new AcmeException("Failed to parse account response");
+
+    account.Url = accountUrl;
+    account.Id = accountUrl;
+
+    ExtractNonce(response);
+    _account = account;
+    return account;
+  }
+
+  // ─── Order management ────────────────────────────────────────────────────
+
+  /// <summary>
+  /// Maak een nieuw certificaatverzoek (order) voor een of meer domeinen.
+  /// </summary>
+  /// <param name="domains">Lijst van domeinnamen (bijv. ["example.com", "www.example.com"])</param>
+  /// <returns>AcmeOrder met authorization URLs</returns>
+  public async Task<AcmeOrder> CreateOrderAsync(params string[] domains)
+  {
+    EnsureDirectoryLoaded();
+    EnsureAccountLoaded();
+
+    var identifiers = new List<Dictionary<string, string>>();
+    foreach (var domain in domains)
+    {
+      identifiers.Add(new Dictionary<string, string>
+      {
+        ["type"] = "dns",
+        ["value"] = domain.TrimStart('*', '.'), // Normaliseer wildcard domeinen
+      });
+    }
+
+    // Voor wildcard domeinen moet het domein zonder * in identifiers staan
+    // maar we slaan het origineel op voor DNS-01 challenge
+    var actualIdentifiers = new List<Dictionary<string, string>>();
+    foreach (var domain in domains)
+    {
+      actualIdentifiers.Add(new Dictionary<string, string>
+      {
+        ["type"] = "dns",
+        ["value"] = domain.StartsWith("*.") ? domain[2..] : domain,
+      });
+    }
+
+    var payload = new { identifiers = actualIdentifiers };
+    var payloadJson = JsonSerializer.Serialize(payload, _jsonOptions);
+    var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+    var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, _directory!.NewOrder, payloadJson);
+
+    var response = await PostJwsAsync(_directory.NewOrder, jwsBody).ConfigureAwait(false);
+
+    var orderJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+    var order = JsonSerializer.Deserialize<AcmeOrder>(orderJson, _jsonOptions)
+      ?? throw new AcmeException("Failed to parse order response");
+
+    order.Url = response.Headers.Location?.AbsoluteUri ?? string.Empty;
+
+    ExtractNonce(response);
+    return order;
+  }
+
+  /// <summary>
+  /// Haal de huidige status van een order op.
+  /// </summary>
+  public async Task<AcmeOrder> GetOrderAsync(string orderUrl)
+  {
+    EnsureAccountLoaded();
+
+    var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+    var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, orderUrl, null);
+
+    var response = await PostJwsAsync(orderUrl, jwsBody).ConfigureAwait(false);
+
+    var orderJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+    var order = JsonSerializer.Deserialize<AcmeOrder>(orderJson, _jsonOptions)
+      ?? throw new AcmeException("Failed to parse order response");
+
+    order.Url = orderUrl;
+    ExtractNonce(response);
+    return order;
+  }
+
+  // ─── Authorization & Challenge ───────────────────────────────────────────
+
+  /// <summary>
+  /// Haal een authorization op van de ACME server.
+  /// </summary>
+  public async Task<Authorization> GetAuthorizationAsync(string authzUrl)
+  {
+    EnsureAccountLoaded();
+
+    var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+    var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, authzUrl, null);
+
+    var response = await PostJwsAsync(authzUrl, jwsBody).ConfigureAwait(false);
+
+    var authzJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+    var authz = JsonSerializer.Deserialize<Authorization>(authzJson, _jsonOptions)
+      ?? throw new AcmeException("Failed to parse authorization response");
+
+    authz.Url = authzUrl;
+
+    ExtractNonce(response);
+    return authz;
+  }
+
+  /// <summary>
+  /// Bereken de key authorization voor een challenge token.
+  /// keyAuthorization = token + "." + base64url(SHA256(canonicalJwkJson))
+  /// </summary>
+  public string GetKeyAuthorization(string token)
+  {
+    EnsureAccountKeyLoaded();
+    return JwtHelper.ComputeKeyAuthorization(token, _accountKey!);
+  }
+
+  /// <summary>
+  /// Bereken de HTTP-01 challenge waarde (= key authorization).
+  /// Deze waarde moet beschikbaar zijn op http://&lt;domain&gt;/.well-known/acme-challenge/&lt;token&gt;
+  /// </summary>
+  public string GetHttpChallengeValue(string token)
+  {
+    return GetKeyAuthorization(token);
+  }
+
+  /// <summary>
+  /// Bereken de DNS-01 challenge waarde (= base64url(SHA256(keyAuthorization))).
+  /// Deze waarde moet als TXT record op _acme-challenge.&lt;domain&gt; staan.
+  /// </summary>
+  public string GetDnsChallengeValue(string token)
+  {
+    var keyAuth = GetKeyAuthorization(token);
+    return JwtHelper.ComputeDns01Value(keyAuth);
+  }
+
+  /// <summary>
+  /// Genereer de DNS-01 validatiedomeinnaam voor een domein.
+  /// Voor wildcard *.example.com is dit _acme-challenge.example.com.
+  /// </summary>
+  public static string GetDnsValidationDomain(string domain)
+  {
+    // Strip wildcard prefix indien aanwezig
+    var baseDomain = domain.StartsWith("*.") ? domain[2..] : domain;
+    return $"_acme-challenge.{baseDomain}";
+  }
+
+  /// <summary>
+  /// Genereer een self-signed TLS-ALPN-01 certificate voor een domein conform RFC 8737.
+  /// Het certificaat bevat de acmeIdentifier extensie (OID 1.3.6.1.5.5.7.1.31)
+  /// met de SHA-256 digest van de key authorization.
+  /// </summary>
+  public X509Certificate2 GenerateTlsAlpnCertificate(string domain, string token)
+  {
+    EnsureAccountKeyLoaded();
+
+    var keyAuth = GetKeyAuthorization(token);
+    var keyAuthHash = SHA256.HashData(Encoding.UTF8.GetBytes(keyAuth));
+
+    using var certKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    var req = new CertificateRequest($"CN={domain}", certKey, HashAlgorithmName.SHA256);
+
+    // Subject Alternative Name met het domein
+    var sanBuilder = new SubjectAlternativeNameBuilder();
+    sanBuilder.AddDnsName(domain);
+    req.CertificateExtensions.Add(sanBuilder.Build());
+
+    // acmeIdentifier extensie (OID 1.3.6.1.5.5.7.1.31) conform RFC 8737 §3
+    // Waarde: DER OCTET STRING met SHA-256 van key authorization
+    var extValue = new byte[34];
+    extValue[0] = 0x04; // OCTET STRING tag
+    extValue[1] = 0x20; // length 32
+    keyAuthHash.CopyTo(extValue, 2);
+    req.CertificateExtensions.Add(new X509Extension("1.3.6.1.5.5.7.1.31", extValue, critical: true));
+
+    var notBefore = DateTimeOffset.UtcNow.AddMinutes(-5);
+    var notAfter = DateTimeOffset.UtcNow.AddDays(1);
+
+    return req.CreateSelfSigned(notBefore, notAfter);
+  }
+
+  /// <summary>
+  /// Zeg tegen de ACME server dat de challenge klaar is voor validatie.
+  /// Roep dit aan nadat je de challenge provisioned hebt (HTTP bestand, DNS record, TLS cert).
+  /// </summary>
+  public async Task ValidateChallengeAsync(string challengeUrl)
+  {
+    EnsureAccountLoaded();
+
+    var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+    // Lege JSON payload ({}) om aan te geven dat we klaar zijn
+    var payloadJson = "{}";
+    var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, challengeUrl, payloadJson);
+
+    var response = await PostJwsAsync(challengeUrl, jwsBody).ConfigureAwait(false);
+    ExtractNonce(response);
+  }
+
+  /// <summary>
+  /// Wacht tot een challenge de status "valid" of "invalid" heeft.
+  /// Poll elke 2 seconden met exponential backoff.
+  /// </summary>
+  public async Task<Challenge> WaitForChallengeValidAsync(string challengeUrl, CancellationToken cancellationToken = default)
+  {
+    EnsureAccountLoaded();
+
+    var delay = TimeSpan.FromSeconds(_retryPolicy.InitialDelaySeconds);
+    var maxDelay = TimeSpan.FromSeconds(_retryPolicy.MaxDelaySeconds);
+
+    for (int attempt = 0; attempt < _retryPolicy.MaxAttempts; attempt++)
+    {
+      await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+
+      var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+      var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, challengeUrl, null);
+
+      var response = await PostJwsAsync(challengeUrl, jwsBody).ConfigureAwait(false);
+      ExtractNonce(response);
+
+      var challengeJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+      var challenge = JsonSerializer.Deserialize<Challenge>(challengeJson, _jsonOptions)
+        ?? throw new AcmeException("Failed to parse challenge response");
+      challenge.Url = challengeUrl;
+
+      if (challenge.Status == "valid")
+        return challenge;
+
+      if (challenge.Status == "invalid")
+        throw new AcmeException($"Challenge {challengeUrl} failed: {challenge.ErrorMessage ?? "unknown error"}");
+
+      // Exponential backoff
+      delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * _retryPolicy.ExponentialBase, maxDelay.TotalSeconds));
+    }
+
+    throw new AcmeException($"Challenge {challengeUrl} did not become valid after {_retryPolicy.MaxAttempts} attempts");
+  }
+
+  // ─── Certificate issuance ────────────────────────────────────────────────
+
+  /// <summary>
+  /// Wacht tot een order de status "ready" heeft (alle authorizations zijn valid).
+  /// </summary>
+  public async Task<AcmeOrder> WaitForOrderReadyAsync(string orderUrl, CancellationToken cancellationToken = default)
+  {
+    var delay = TimeSpan.FromSeconds(_retryPolicy.InitialDelaySeconds);
+    var maxDelay = TimeSpan.FromSeconds(_retryPolicy.MaxDelaySeconds);
+
+    for (int attempt = 0; attempt < _retryPolicy.MaxAttempts; attempt++)
+    {
+      var order = await GetOrderAsync(orderUrl).ConfigureAwait(false);
+
+      if (order.Status == "ready" || order.Status == "valid")
+        return order;
+
+      if (order.Status == "invalid")
+        throw new AcmeException($"Order {orderUrl} is in invalid state");
+
+      await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+      delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * _retryPolicy.ExponentialBase, maxDelay.TotalSeconds));
+    }
+
+    throw new AcmeException($"Order {orderUrl} did not become ready after {_retryPolicy.MaxAttempts} attempts");
+  }
+
+  /// <summary>
+  /// Finaliseer een order door een CSR in te dienen.
+  /// Genereert automatisch een nieuw EC P-256 sleutelpaar voor het certificaat.
+  /// </summary>
+  /// <param name="order">De order om te finaliseren</param>
+  /// <param name="domains">Domeinnamen voor het certificaat (SAN)</param>
+  /// <param name="certKey">Optioneel EC sleutelpaar voor het certificaat; nieuw sleutelpaar wordt gegenereerd als null</param>
+  /// <returns>Updated order met certificate URL</returns>
+  public async Task<(AcmeOrder Order, byte[] CertificatePrivateKey)> FinalizeOrderAsync(
+    AcmeOrder order,
+    string[] domains,
+    ECDsa? certKey = null)
+  {
+    EnsureAccountLoaded();
+
+    var ownCertKey = certKey == null;
+    certKey ??= ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
     try
     {
-      var authz = await GetAuthorizationAsync(authorizationId!).ConfigureAwait(false);
+      // Genereer CSR
+      var csrBytes = GenerateCsr(domains, certKey);
+      var csrB64 = JwtHelper.Encode(csrBytes);
 
-      if (authz.Status != "valid")
-      {
-        throw new InvalidOperationException($"Authorization for {domain} not valid: {authz.Status}");
-      }
+      var payload = new { csr = csrB64 };
+      var payloadJson = JsonSerializer.Serialize(payload, _jsonOptions);
+      var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+      var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, order.Finalize, payloadJson);
 
-      Authorization = authz;
-      return authz;
+      var response = await PostJwsAsync(order.Finalize, jwsBody).ConfigureAwait(false);
+      ExtractNonce(response);
+
+      var orderJson = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+      var updatedOrder = JsonSerializer.Deserialize<AcmeOrder>(orderJson, _jsonOptions)
+        ?? throw new AcmeException("Failed to parse finalize response");
+
+      updatedOrder.Url = order.Url;
+
+      var certPrivateKey = certKey.ExportPkcs8PrivateKey();
+      return (updatedOrder, certPrivateKey);
     }
-    catch
+    finally
     {
-      // Authorization doesn't exist yet - request it
-      return await RequestAuthorizationAsync(domain).ConfigureAwait(false);
-    }
-  }
-
-  /// <summary>
-  /// Validate challenge en wacht tot status "valid" (met retry).
-  /// </summary>
-  public async Task<Challenge> WaitForChallengeSuccessAsync(string challId, ChallengeType type)
-  {
-    var challenge = await GetChallengeAsync(challId).ConfigureAwait(false);
-
-    if (challenge.Status == "valid")
-    {
-      return challenge;
-    }
-
-    // Set status via storage interface
-    challenge.Status = "pending";
-    await _storage.SetChallengeStatusAsync(challId, ChallengeStatus.Pending);
-
-    // Poll voor succesvol validation met retry
-    int attempts = 0;
-
-    while (challenge.Status != "valid" && challenge.Status != "invalid")
-    {
-      if (attempts++ >= _retryPolicy.MaxAttempts)
-      {
-        throw new AcmeException($"Challenge {challId} failed after {_retryPolicy.MaxAttempts} attempts");
-      }
-
-      await Task.Delay(2000); // Poll cada 2 seconden
-
-      challenge = await GetChallengeAsync(challId).ConfigureAwait(false);
-    }
-
-    return challenge;
-  }
-
-  /// <summary>
-  /// Provisioneer HTTP-01 challenge.
-  /// </summary>
-  public async Task<string> ProvisionHttpChallengeAsync(Challenge challenge, Authorization authz)
-  {
-    if (challenge.Type != "http-01")
-    {
-      throw new ArgumentException($"Expected http-01 challenge, got: {challenge.Type}");
-    }
-
-    var url = $"{AcmeServerUrl}/well-known/acme-challenge/{challenge.Token ?? ""}";
-
-    // Set challenge status via storage
-    challenge.Status = "pending";
-    await _storage.SetChallengeStatusAsync(challenge.Id, ChallengeStatus.Pending);
-
-    // Store expected value in memory (extern app schrijft naar URL)
-    var expectedValue = JwtHelper.Encode(challenge.ExpectedValue ?? string.Empty);
-
-    return url;
-  }
-
-  /// <summary>
-  /// Provisioneer DNS-01 challenge.
-  /// </summary>
-  public async Task<string> ProvisionDnsChallengeAsync(Challenge challenge, Authorization authz)
-  {
-    if (challenge.Type != "dns-01")
-    {
-      throw new ArgumentException($"Expected dns-01 challenge, got: {challenge.Type}");
-    }
-
-    // Generate validation domain (e.g., _acme-challenge.example.com)
-    string validationDomain = await BuildValidationDomainAsync(authz.Identifier).ConfigureAwait(false);
-
-    // Calculate key authorization digest voor TXT record
-    byte[] digestBytes = ComputeKeyAuthorizationDigest();
-    string digestBase64 = JwtHelper.Encode(digestBytes);
-
-    // Store in storage (MongoDB/disk)
-    await _storage.SetDnsRecordAsync(validationDomain, digestBase64).ConfigureAwait(false);
-
-    challenge.ValidationDomain = validationDomain;
-    challenge.Token = digestBase64;
-    challenge.ExpectedValue = digestBase64;
-
-    return digestBase64;
-  }
-
-  /// <summary>
-  /// Provisioneer TLS-ALPN-01 challenge.
-  /// </summary>
-  public async Task<string> ProvisionTlsAlpnChallengeAsync(Challenge challenge, Authorization authz)
-  {
-    if (challenge.Type != "tls-alpn-01")
-    {
-      throw new ArgumentException($"Expected tls-alpn-01 challenge, got: {challenge.Type}");
-    }
-
-    // Generate self-signed cert voor TLS-ALPN validation
-    byte[] certBytes = GenerateTlsAlpnCertificate(authz.Identifier);
-
-    // Store cert in storage
-    await _storage.SaveCertificateAsync(authz.Identifier, certBytes, Array.Empty<byte>()).ConfigureAwait(false);
-
-    return "TLS ALPN challenge ready - configure server to negotiate acme-tls/1";
-  }
-
-  /// <summary>
-  /// Submit validated challenge.
-  /// </summary>
-  public async Task SubmitChallengeAsync(string challId)
-  {
-    StringContent content = new StringContent("{}")
-    {
-      Headers =
-      {
-        ContentType = MediaTypeHeaderValue.Parse("application/jose+json")
-      }
-    };
-
-    // Construct challenge URL from authz and chall ID
-    string? challengeUrl = null;
-    if (Authorization != null)
-    {
-      challengeUrl = $"{AcmeServerUrl}/authz/{Authorization.Id}/chall/{challId}";
-    }
-
-    var response = await _httpClient.PostAsync(challengeUrl, content).ConfigureAwait(false);
-
-    if (!response.IsSuccessStatusCode)
-    {
-      throw new AcmeException($"Failed to submit challenge: {response.StatusCode}");
+      if (ownCertKey)
+        certKey.Dispose();
     }
   }
 
   /// <summary>
-  /// Get certificate bundle for domain.
+  /// Wacht tot een order is verwerkt en download daarna het certificaat.
   /// </summary>
-  public async Task<string> GetCertificateAsync(string authzId)
+  public async Task<AcmeOrder> WaitForOrderValidAsync(string orderUrl, CancellationToken cancellationToken = default)
   {
-    var response = await _httpClient.GetAsync(
-        $"{AcmeServerUrl}/authz/{authzId}")
-      .ConfigureAwait(false);
+    var delay = TimeSpan.FromSeconds(_retryPolicy.InitialDelaySeconds);
+    var maxDelay = TimeSpan.FromSeconds(_retryPolicy.MaxDelaySeconds);
 
-    if (!response.IsSuccessStatusCode)
+    for (int attempt = 0; attempt < _retryPolicy.MaxAttempts; attempt++)
     {
-      throw new AcmeException($"Failed to get certificate: {response.StatusCode}");
+      var order = await GetOrderAsync(orderUrl).ConfigureAwait(false);
+
+      if (order.Status == "valid" && order.Certificate != null)
+        return order;
+
+      if (order.Status == "invalid")
+        throw new AcmeException($"Order {orderUrl} is in invalid state");
+
+      await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+      delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * _retryPolicy.ExponentialBase, maxDelay.TotalSeconds));
     }
+
+    throw new AcmeException($"Order {orderUrl} did not become valid after {_retryPolicy.MaxAttempts} attempts");
+  }
+
+  /// <summary>
+  /// Download het certificaat van een voltooide order.
+  /// </summary>
+  /// <returns>PEM-encoded certificaatketen</returns>
+  public async Task<string> DownloadCertificateAsync(AcmeOrder order)
+  {
+    if (order.Certificate == null)
+      throw new InvalidOperationException("Order does not have a certificate URL yet. Is the order status 'valid'?");
+
+    EnsureAccountLoaded();
+
+    var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+    var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, order.Certificate, null);
+
+    var response = await PostJwsAsync(order.Certificate, jwsBody).ConfigureAwait(false);
+    ExtractNonce(response);
 
     return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
   }
 
+  // ─── Certificate revocation ──────────────────────────────────────────────
+
   /// <summary>
-  /// Revoke certificate.
+  /// Revoceer een certificaat conform RFC 8555 §7.6.
   /// </summary>
-  public async Task RevokeCertificateAsync(byte[] certificate, Account account)
+  /// <param name="certDer">DER-encoded certificaat</param>
+  /// <param name="reason">Optionele revocation reason code (RFC 5280 CRL reason codes)</param>
+  public async Task RevokeCertificateAsync(byte[] certDer, int? reason = null)
   {
-    // Calculate SHA-256 digest van cert voor revocation
-    using var sha256 = SHA256.Create();
-    byte[] digest = sha256.ComputeHash(certificate);
+    EnsureDirectoryLoaded();
+    EnsureAccountLoaded();
 
-    string postJson = $"{{\"certificate\":\"{Convert.ToBase64String(digest)}\",\"revokeReason\":0}}";
+    var certB64 = JwtHelper.Encode(certDer);
+    object payload = reason.HasValue
+      ? new { certificate = certB64, reason = reason.Value }
+      : (object)new { certificate = certB64 };
 
-    StringContent content = new StringContent(postJson, Encoding.UTF8, "application/json")
-    {
-      Headers =
-      {
-        ContentType = MediaTypeHeaderValue.Parse("application/jose+json")
-      }
-    };
+    var payloadJson = JsonSerializer.Serialize(payload, _jsonOptions);
+    var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+    var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, _directory!.RevokeCert, payloadJson);
 
-    // Sign en post revoke request
-    throw new NotImplementedException("Certificate revocation - requires JWS signing");
+    var response = await PostJwsAsync(_directory.RevokeCert, jwsBody).ConfigureAwait(false);
+    ExtractNonce(response);
   }
 
+  // ─── Account deactivation ────────────────────────────────────────────────
+
   /// <summary>
-  /// Deactivate account.
+  /// Deactiveer het huidige account conform RFC 8555 §7.3.6.
   /// </summary>
   public async Task DeactivateAccountAsync()
   {
-    StringContent content = new StringContent("{}");
+    EnsureAccountLoaded();
 
-    var response = await _httpClient.PostAsync(
-        $"{AcmeServerUrl}/acct/{_account!.Id}", content)
-      .ConfigureAwait(false);
+    var payload = new { status = "deactivated" };
+    var payloadJson = JsonSerializer.Serialize(payload, _jsonOptions);
+    var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
+    var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, _account.Url, payloadJson);
+
+    var response = await PostJwsAsync(_account.Url, jwsBody).ConfigureAwait(false);
+    ExtractNonce(response);
+    _account = null;
+  }
+
+  // ─── Private helpers ─────────────────────────────────────────────────────
+
+  private static byte[] GenerateCsr(string[] domains, ECDsa certKey)
+  {
+    if (domains.Length == 0)
+      throw new ArgumentException("At least one domain name is required", nameof(domains));
+
+    var req = new CertificateRequest($"CN={domains[0]}", certKey, HashAlgorithmName.SHA256);
+
+    var sanBuilder = new SubjectAlternativeNameBuilder();
+    foreach (var domain in domains)
+      sanBuilder.AddDnsName(domain);
+
+    req.CertificateExtensions.Add(sanBuilder.Build());
+
+    return req.CreateSigningRequest();
+  }
+
+  private async Task<HttpResponseMessage> PostJwsAsync(string url, string jwsBody)
+  {
+    using var content = new StringContent(jwsBody, Encoding.UTF8, "application/jose+json");
+
+    var response = await _httpClient.PostAsync(url, content).ConfigureAwait(false);
 
     if (!response.IsSuccessStatusCode)
     {
-      throw new AcmeException($"Failed to deactivate account: {response.StatusCode}");
+      var errorBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+      // Probeer ACME error te parsen
+      AcmeError? acmeError = null;
+      try
+      {
+        acmeError = JsonSerializer.Deserialize<AcmeError>(errorBody, _jsonOptions);
+      }
+      catch
+      {
+        // Negeer parse fouten
+      }
+
+      var message = acmeError?.Detail ?? errorBody;
+      throw new AcmeException($"ACME request to {url} failed ({response.StatusCode}): {message}");
     }
+
+    return response;
   }
 
-  /// <summary>
-  /// Deactivate authorization.
-  /// </summary>
-  public async Task DeactivateAuthorizationAsync()
+  private void ExtractNonce(HttpResponseMessage response)
   {
-    StringContent content = new StringContent("{}");
-
-    var response = await _httpClient.PostAsync(
-        $"{AcmeServerUrl}/acme/authz/{Authorization!.Id}", content)
-      .ConfigureAwait(false);
-
-    if (!response.IsSuccessStatusCode)
+    if (response.Headers.TryGetValues("Replay-Nonce", out var values))
     {
-      throw new AcmeException($"Failed to deactivate authorization: {response.StatusCode}");
+      foreach (var nonce in values)
+      {
+        _nonce = nonce;
+        break;
+      }
     }
   }
 
-  /// <summary>
-  /// Bereken SHA-256 digest van key authorization.
-  /// </summary>
-  private byte[] ComputeKeyAuthorizationDigest()
+  private void EnsureDirectoryLoaded()
   {
-    // RFC 8555 §3.1: HMAC_SHA256(account_key, authz_id)
-    throw new NotImplementedException("HMAC computation requires account key storage");
+    if (_directory == null)
+      throw new InvalidOperationException("Directory not loaded. Call LoadDirectoryAsync() first.");
   }
 
-  /// <summary>
-  /// Generate self-signed cert voor TLS-ALPN.
-  /// </summary>
-  private byte[] GenerateTlsAlpnCertificate(string domainName)
+  private void EnsureAccountKeyLoaded()
   {
-    // Create certificate met:
-    // - subjectAltName containing domain
-    // - critical acmeIdentifier extension (OID 1.3.6.1.5.5.7.1.31)
-
-    throw new NotImplementedException("TLS ALPN certificate generation");
+    if (_accountKey == null)
+      throw new InvalidOperationException("Account key not loaded. Call GenerateAccountKey() or LoadAccountKey() first.");
   }
 
-  /// <summary>
-  /// Generate authorization ID.
-  /// </summary>
-  private async Task<string?> GenerateAuthorizationId(string accountId, string domain)
+  private void EnsureAccountLoaded()
   {
-    var authz = await RequestAuthorizationForDomainAsync(domain).ConfigureAwait(false);
-    return authz.Id;
-  }
-
-  /// <summary>
-  /// Build validation domain voor DNS challenge.
-  /// </summary>
-  private async Task<string> BuildValidationDomainAsync(string identifier)
-  {
-    var parts = identifier.Split('.');
-
-    // Voor wildcard: _acme-challenge.<subdomain>.<base_domain>
-    // Voor non-wildcard: _acme-challenge.<full_domain>
-    string baseDomain = identifier.Length > 20 ? parts[^1] : identifier;
-    string validationSubdomain = "_acme-challenge";
-
-    return $"{validationSubdomain}.{identifier}";
-  }
-
-  /// <summary>
-  /// Create JWS header voor ACME calls.
-  /// </summary>
-  private JwsHeaderExtensions CreateJwsHeader()
-  {
+    EnsureAccountKeyLoaded();
     if (_account == null)
-    {
-      throw new InvalidOperationException("Account not loaded yet");
-    }
-
-    // Load nonce van directory (vereist bij ACME v2)
-    var response = _httpClient.GetAsync("/new-nonce").Result;
-    string? nonce = null;
-    if (response.IsSuccessStatusCode)
-    {
-      string nonceContent = response.Content.ReadAsStringAsync().Result;
-      nonce = JsonSerializer.Deserialize<string>(nonceContent);
-    }
-
-    return new JwsHeaderExtensions
-    {
-      Alg = "ES256",
-      Kid = $"{AcmeServerUrl}/acme/acct/{_account.Id}",
-      Nonce = nonce,
-      Url = _httpClient.BaseAddress.ToString() ?? string.Empty
-    };
-  }
-
-  private string ExtractAuthorizationUrl(string? locationUri)
-  {
-    if (locationUri == null)
-    {
-      throw new InvalidOperationException("Location header missing from ACME response");
-    }
-
-    return locationUri;
+      throw new InvalidOperationException("Account not loaded. Call CreateAccountAsync() or LoadAccountAsync() first.");
   }
 
   public void Dispose()
   {
+    _accountKey?.Dispose();
     _httpClient?.Dispose();
+    GC.SuppressFinalize(this);
   }
 }
