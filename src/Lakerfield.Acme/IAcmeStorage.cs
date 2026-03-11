@@ -6,78 +6,78 @@ using Lakerfield.Acme.Models;
 namespace Lakerfield.Acme;
 
 /// <summary>
-/// Storage interface voor ACME credentials en validation data.
-/// Implementatie kan MongoDB, disk, of andere storage gebruiken.
+/// Storage interface for ACME credentials and validation data.
+/// Implementations can use MongoDB, disk, or any other storage backend.
 /// </summary>
 public interface IAcmeStorage : IDisposable
 {
   /// <summary>
-  /// Haal of creeer een account met de opgegeven private key.
+  /// Retrieves or creates an account for the given private key.
   /// </summary>
   /// <param name="keyJwk">Base64Url-encoded private key JWK</param>
   /// <param name="serverUrl">ACME server URL (e.g., acme-v02.api.letsencrypt.org)</param>
-  /// <returns>Account object met ID en URL</returns>
+  /// <returns>Account object with ID and URL</returns>
   Task<Account> GetOrCreateAccountAsync(string keyJwk, string serverUrl);
 
   /// <summary>
-  /// Haal een challenge op door zijn ID.
+  /// Retrieves a challenge by its ID.
   /// </summary>
-  /// <param name="challengeId">Challenge identifier van de authorization</param>
+  /// <param name="challengeId">Challenge identifier from the authorization</param>
   /// <returns>Challenge object</returns>
   Task<Challenge> GetChallengeAsync(string challengeId);
 
   /// <summary>
-  /// Update de status van een challenge (pending, valid, invalid).
+  /// Updates the status of a challenge (pending, valid, invalid).
   /// </summary>
   /// <param name="challengeId">Challenge identifier</param>
-  /// <param name="status">Nieuwe status conform RFC 8555</param>
+  /// <param name="status">New status as per RFC 8555</param>
   Task SetChallengeStatusAsync(string challengeId, ChallengeStatus status);
 
   /// <summary>
-  /// Haal de huidige DNS TXT record op voor een validatie domein.
+  /// Retrieves the current DNS TXT record for a validation domain.
   /// </summary>
-  /// <param name="validationDomain">Validatie domein (e.g., _acme-challenge.example.com)</param>
-  /// <returns>TXT record waarde</returns>
+  /// <param name="validationDomain">Validation domain (e.g., _acme-challenge.example.com)</param>
+  /// <returns>TXT record value</returns>
   Task<string?> GetDnsRecordAsync(string validationDomain);
 
   /// <summary>
-  /// Provisioneer een DNS TXT record voor validation.
+  /// Provisions a DNS TXT record for validation.
   /// </summary>
-  /// <param name="validationDomain">Validatie domein</param>
-  /// <param name="value">TXT record waarde (base64 van key authorization digest)</param>
+  /// <param name="validationDomain">Validation domain</param>
+  /// <param name="value">TXT record value (base64 of key authorization digest)</param>
   Task SetDnsRecordAsync(string validationDomain, string value);
 
   /// <summary>
-  /// Haal de private key op voor een account door zijn key ID.
+  /// Retrieves the private key for an account by its key ID.
   /// </summary>
   /// <param name="accountKeyId">Account key identifier</param>
-  /// <returns>Private key in bytes (unencrypted)</returns>
+  /// <returns>Private key bytes (unencrypted)</returns>
   Task<byte[]> GetPrivateKeyAsync(string accountKeyId);
 
   /// <summary>
-  /// Sla een certificate bundle op voor een domein.
+  /// Saves a certificate bundle for a domain.
   /// </summary>
-  /// <param name="domainName">Domein waarvoor het cert geldig is</param>
+  /// <param name="domainName">Domain for which the certificate is valid</param>
   /// <param name="certificate">Leaf certificate in PEM bytes</param>
   /// <param name="privateKey">Private key in PEM bytes</param>
   Task SaveCertificateAsync(string domainName, byte[] certificate, byte[] privateKey);
 
   /// <summary>
-  /// Haal een opgeslagen certificate bundle op.
+  /// Retrieves a stored certificate bundle.
   /// </summary>
-  /// <param name="domainName">Domein van het certificate</param>
+  /// <param name="domainName">Domain of the certificate</param>
   /// <returns>CertificateBundle object</returns>
   Task<CertificateBundle?> GetCertificateAsync(string domainName);
 
   /// <summary>
-  /// Verwijder een opgeslagen certificate bundle.
+  /// Removes a stored certificate bundle.
   /// </summary>
-  /// <param name="domainName">Domein van het certificate</param>
+  /// <param name="domainName">Domain of the certificate</param>
   Task RemoveCertificateAsync(string domainName);
 
   /// <summary>
-  /// Haal alle opgeslagen certificaten op.
+  /// Retrieves all stored certificates.
   /// </summary>
-  /// <returns>Lijst van CertificateBundle objects</returns>
+  /// <returns>List of CertificateBundle objects</returns>
   Task<List<CertificateBundle>> GetAllCertificatesAsync();
 }

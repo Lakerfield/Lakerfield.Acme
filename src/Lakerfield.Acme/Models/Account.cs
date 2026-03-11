@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Account object conform RFC 8555 §7.1.2
+/// ACME Account object as per RFC 8555 §7.1.2
 /// </summary>
 public class Account
 {

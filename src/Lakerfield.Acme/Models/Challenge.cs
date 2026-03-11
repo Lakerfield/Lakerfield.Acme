@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Challenge object conform RFC 8555 §7.1.5
+/// ACME Challenge object as per RFC 8555 §7.1.5
 /// </summary>
 public class Challenge
 {
@@ -55,7 +55,7 @@ public class Challenge
 }
 
 /// <summary>
-/// Challenge status enumeration conform RFC 8555
+/// Challenge status enumeration as per RFC 8555
 /// </summary>
 public enum ChallengeStatus
 {

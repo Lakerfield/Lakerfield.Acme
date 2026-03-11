@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Authorization object conform RFC 8555 §7.1.4
+/// ACME Authorization object as per RFC 8555 §7.1.4
 /// </summary>
 public class Authorization
 {

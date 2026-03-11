@@ -7,8 +7,8 @@ using Lakerfield.Acme.Models;
 namespace Lakerfield.Acme;
 
 /// <summary>
-/// Helper voor JWS (JSON Web Signature) operations conform RFC 7515 en RFC 8555.
-/// Implementeert ECDSA P-256 (ES256) signing zonder externe dependencies.
+/// Helper for JWS (JSON Web Signature) operations as per RFC 7515 and RFC 8555.
+/// Implements ECDSA P-256 (ES256) signing without external dependencies.
 /// </summary>
 public static class JwtHelper
 {
@@ -19,7 +19,7 @@ public static class JwtHelper
   };
 
   /// <summary>
-  /// Bereken base64url encoding van byte array conform RFC 7515 §2.
+  /// Computes base64url encoding of a byte array as per RFC 7515 §2.
   /// </summary>
   public static string Encode(byte[] data)
   {
@@ -30,12 +30,12 @@ public static class JwtHelper
   }
 
   /// <summary>
-  /// Bereken base64url encoding van string (als UTF-8 bytes).
+  /// Computes base64url encoding of a string (as UTF-8 bytes).
   /// </summary>
   public static string Encode(string payload) => Encode(Encoding.UTF8.GetBytes(payload));
 
   /// <summary>
-  /// Decode base64url string terug naar bytes.
+  /// Decodes a base64url string back to bytes.
   /// </summary>
   public static byte[] Decode(string encoded)
   {
@@ -53,8 +53,8 @@ public static class JwtHelper
   }
 
   /// <summary>
-  /// Bereken de JWK thumbprint van een EC P-256 public key conform RFC 7638.
-  /// De canonical JSON is: {"crv":"P-256","kty":"EC","x":"...","y":"..."} (keys gesorteerd).
+  /// Computes the JWK thumbprint of an EC P-256 public key as per RFC 7638.
+  /// The canonical JSON is: {"crv":"P-256","kty":"EC","x":"...","y":"..."} (keys sorted).
   /// </summary>
   public static string ComputeJwkThumbprint(ECDsa ecKey)
   {
@@ -62,14 +62,14 @@ public static class JwtHelper
     var x = Encode(parameters.Q.X!);
     var y = Encode(parameters.Q.Y!);
 
-    // RFC 7638: canonical JSON met keys lexicografisch gesorteerd
+    // RFC 7638: canonical JSON with keys sorted lexicographically
     var canonicalJson = $"{{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"{x}\",\"y\":\"{y}\"}}";
     var thumbprintBytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonicalJson));
     return Encode(thumbprintBytes);
   }
 
   /// <summary>
-  /// Maak een EcPublicKeyJwk object van een EC P-256 key.
+  /// Creates an EcPublicKeyJwk object from an EC P-256 key.
   /// </summary>
   public static EcPublicKeyJwk ToPublicKeyJwk(ECDsa ecKey)
   {
@@ -82,7 +82,7 @@ public static class JwtHelper
   }
 
   /// <summary>
-  /// Bereken de key authorization voor een ACME challenge token conform RFC 8555 §8.1.
+  /// Computes the key authorization for an ACME challenge token as per RFC 8555 §8.1.
   /// keyAuthorization = token + "." + base64url(SHA256(canonicalJwkJson))
   /// </summary>
   public static string ComputeKeyAuthorization(string token, ECDsa ecKey)
@@ -92,7 +92,7 @@ public static class JwtHelper
   }
 
   /// <summary>
-  /// Bereken de DNS-01 challenge waarde conform RFC 8555 §8.4.
+  /// Computes the DNS-01 challenge value as per RFC 8555 §8.4.
   /// dns01Value = base64url(SHA256(keyAuthorization))
   /// </summary>
   public static string ComputeDns01Value(string keyAuthorization)
@@ -102,8 +102,8 @@ public static class JwtHelper
   }
 
   /// <summary>
-  /// Maak een geserialiseerde JWS JSON string voor een ACME POST request.
-  /// Gebruikt de JWK (public key) in de header - voor new-account en revokeCert.
+  /// Creates a serialized JWS JSON string for an ACME POST request.
+  /// Uses the JWK (public key) in the header — for new-account and revokeCert requests.
   /// </summary>
   public static string CreateJwsWithJwk(ECDsa ecKey, string nonce, string url, string? payloadJson)
   {
@@ -119,8 +119,8 @@ public static class JwtHelper
   }
 
   /// <summary>
-  /// Maak een geserialiseerde JWS JSON string voor een ACME POST request.
-  /// Gebruikt het account URL als kid - voor alle requests na account aanmaken.
+  /// Creates a serialized JWS JSON string for an ACME POST request.
+  /// Uses the account URL as kid — for all requests after account creation.
   /// </summary>
   public static string CreateJwsWithKid(ECDsa ecKey, string accountUrl, string nonce, string url, string? payloadJson)
   {
@@ -135,7 +135,7 @@ public static class JwtHelper
   }
 
   /// <summary>
-  /// Bereken header JSON conform RFC 7515.
+  /// Encodes the header JSON as per RFC 7515.
   /// </summary>
   public static string EncodeHeader(JwsHeaderExtensions header)
   {
@@ -148,16 +148,16 @@ public static class JwtHelper
     var headerJson = JsonSerializer.Serialize(header, _jsonOptions);
     var protectedB64 = Encode(Encoding.UTF8.GetBytes(headerJson));
 
-    // POST-as-GET gebruikt leeg payload; reguliere POSTs gebruiken base64url(json)
+    // POST-as-GET uses empty payload; regular POSTs use base64url(json)
     var payloadB64 = payloadJson == null ? string.Empty : Encode(Encoding.UTF8.GetBytes(payloadJson));
 
     var signingInput = Encoding.UTF8.GetBytes($"{protectedB64}.{payloadB64}");
 
-    // ECDSA P-256 signing met IEEE P1363 formaat (r || s, geen DER ASN.1)
+    // ECDSA P-256 signing with IEEE P1363 format (r || s, not DER ASN.1)
     var signatureBytes = ecKey.SignData(signingInput, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
     var signatureB64 = Encode(signatureBytes);
 
-    // JSON FlattenedSerialization conform RFC 7515 §7.2.2 / RFC 8555 §6.2
+    // JSON Flattened Serialization as per RFC 7515 §7.2.2 / RFC 8555 §6.2
     return JsonSerializer.Serialize(new
     {
       @protected = protectedB64,

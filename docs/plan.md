@@ -1,10 +1,10 @@
-# Lakerfield.Acme - Implementatieplan
+# Lakerfield.Acme - Implementation Plan
 
-## Doel
+## Goal
 
-Een simpele .NET 10 library die de ACME protocol (RFC 8555) implementeert voor communicatie met Let's Encrypt. De library is een **losse wrapper** rondom `HttpClient` en biedt geen YARP-integratie - de externe app (YARP-based reverse proxy) stuurt alle logica aan.
+A simple .NET 10 library that implements the ACME protocol (RFC 8555) for communication with Let's Encrypt. The library is a **thin wrapper** around `HttpClient` and provides no YARP integration — the host application (e.g. a YARP-based reverse proxy) drives all logic.
 
-## Architectuur
+## Architecture
 
 ```
 LakerfieldAcmeClient
@@ -16,23 +16,23 @@ LakerfieldAcmeClient
 └── Certificate bundling & renewal
 ```
 
-**Dit is een pure ACME client library** - geen YARP specifieke integratie, geen DI containers, puur HTTP calls naar ACME servers.
+**This is a pure ACME client library** — no YARP-specific integration, no DI containers, pure HTTP calls to ACME servers.
 
-## Overzicht van Gebruikerseisen
+## User Requirements Overview
 
-| Vereiste | Implementatie |
-|----------|---------------|
+| Requirement | Implementation |
+|-------------|----------------|
 | **Challenges** | HTTP-01, DNS-01, TLS-ALPN-01 (RFC 8737) |
-| **Wildcards** | Echte DNS wildcards voor subdomains via DNS-01 |
-| **Storage** | Interface voor storage (MongoDB of disk) - externe app implementeert |
+| **Wildcards** | True DNS wildcards for subdomains via DNS-01 |
+| **Storage** | Interface for storage (MongoDB or disk) — host app implements |
 | **Certificates** | In-memory lifecycle via storage interface |
 | **ACME Server** | Let's Encrypt (`acme-v02.api.letsencrypt.org`) |
 
-## Interfaces en Contracten
+## Interfaces and Contracts
 
 ### 1. Storage Interface
 
-De library definieert een **interface voor storage** die de externe app implementeert:
+The library defines a **storage interface** that the host application implements:
 
 ```csharp
 public interface IAcmeStorage : IDisposable
@@ -40,180 +40,172 @@ public interface IAcmeStorage : IDisposable
     Task<Account> GetOrCreateAccountAsync(string keyJwk, string serverUrl);
     Task<Challenge> GetChallengeAsync(string challengeId);
     Task SetChallengeStatusAsync(string challengeId, ChallengeStatus status);
-    Task<string> GetDnsRecordAsync(string validationDomain);
+    Task<string?> GetDnsRecordAsync(string validationDomain);
     Task SetDnsRecordAsync(string validationDomain, string value);
-    Task<byte[]> GetPrivateKeyAsync(AccountKeyIdentifier keyRef);
+    Task<byte[]> GetPrivateKeyAsync(string accountKeyId);
     Task SaveCertificateAsync(string domainName, byte[] certificate, byte[] privateKey);
+    Task<CertificateBundle?> GetCertificateAsync(string domainName);
+    Task RemoveCertificateAsync(string domainName);
+    Task<List<CertificateBundle>> GetAllCertificatesAsync();
 }
 ```
 
-De externe app (YARP proxy) implementeert deze interface met MongoDB of disk storage.
+The host application (YARP proxy) implements this interface with MongoDB or disk storage.
 
 ### 2. LakerfieldAcmeClient Constructor
 
-De client ontvangt de storage interface via constructor - geen DI dependencies:
+The client receives the storage interface via the constructor — no DI dependencies:
 
 ```csharp
 var client = new LakerfieldAcmeClient(
-    httpClient,           // Optioneel, standaard HttpClient gebruiken ook
-    storage,              // Externe implementatie
-    acmeServerUrl         // "https://acme-v02.api.letsencrypt.org/directory"
+    httpClient,       // Optional, uses a default HttpClient if omitted
+    storage,          // External implementation
+    retryPolicy       // Optional AcmeRetryConfig
 );
+client.AcmeServerUrl = "https://acme-v02.api.letsencrypt.org/directory";
 ```
 
 ## Challenges & Wildcards
 
-**HTTP-01 & TLS-ALPN-01**: RFC 8555 specificeert dat deze challenges géén echte wildcards ondersteunen. Implementatie:
+**HTTP-01 & TLS-ALPN-01**: RFC 8555 specifies that these challenges do **not** support true wildcards. Each hostname requires its own challenge:
 
 ```
-www.example.com → aparte challenge
-api.example.com → aparte challenge
-mail.example.com → aparte challenge
+www.example.com  → individual challenge
+api.example.com  → individual challenge
+mail.example.com → individual challenge
 ```
 
-**DNS-01**: Ondersteunt echte DNS wildcards zoals `_docusign.example.com` door de storage interface aan te laten zien dat een TXT record voor een wildcard wordt aangevraagd.
+**DNS-01**: Supports true DNS wildcards such as `*.example.com` by setting a TXT record on `_acme-challenge.example.com`.
 
-### Challenges Workflow
+### Challenge Workflow
 
-1. `client.CreateAccount()` - Account aanmaken
-2. `client.RequestAuthorization(domain)` - Authorization request
-3. `client.Challenges[challengeId].Status = "pending"` (via storage interface)
-4. `await client.ValidateChallenge(challengeId)` - Validation via HTTP/DNS/ALPN
-5. `client.GetCertificate(accountId, domain)` - Certificate ophalen
+1. `client.LoadDirectoryAsync()` — Load ACME directory
+2. `client.GenerateAccountKey()` — Generate EC P-256 key
+3. `client.CreateAccountAsync(email)` — Create account
+4. `client.CreateOrderAsync(domain)` — Place certificate order
+5. `client.GetAuthorizationAsync(authzUrl)` — Retrieve authorization
+6. Provision the challenge (HTTP file, DNS TXT record, or TLS cert)
+7. `client.ValidateChallengeAsync(challengeUrl)` — Notify ACME server
+8. `client.WaitForChallengeValidAsync(challengeUrl)` — Poll until valid
+9. `client.WaitForOrderReadyAsync(orderUrl)` — Wait for order ready
+10. `client.FinalizeOrderAsync(order, domains)` — Submit CSR
+11. `client.WaitForOrderValidAsync(orderUrl)` — Wait for order valid
+12. `client.DownloadCertificateAsync(order)` — Download PEM certificate
 
-## Implementatie Plan
+## Implementation Plan
 
-### Fase 1: Core Infrastructure (Dag 1-2)
+### Phase 1: Core Infrastructure ✅
 
-1. **Project structuur setup**
-   - `Lakerfield.Acme` project met .NET 10 target framework
-   - NuGet dependencies: `System.Net.Http`, `System.Text.Json`
+1. **Project structure**
+   - `Lakerfield.Acme` project targeting .NET 10
+   - No external NuGet dependencies (uses `System.Net.Http`, `System.Text.Json`, `System.Security.Cryptography`)
 
 2. **Model classes**
-   - `Account` (RFC 8555 §6)
-   - `Challenge` (RFC 8555 §3, §6)
-   - `Authorization` (RFC 8555 §4)
-   - `CertificateBundle` (RFC 8555 §7.5)
+   - `Account` (RFC 8555 §7.1.2)
+   - `Challenge` (RFC 8555 §7.1.5)
+   - `Authorization` (RFC 8555 §7.1.4)
+   - `AcmeOrder` (RFC 8555 §7.1.3)
+   - `AcmeDirectory` (RFC 8555 §7.1.1)
+   - `CertificateBundle`
 
 3. **Storage interface**
-   - `IAcmeStorage` met alle benodigde methods
-   - Gebruiker implementeert MongoDB/disk storage zelf
+   - `IAcmeStorage` with all required methods
+   - User implements MongoDB/disk storage
 
-### Fase 2: Account Management (Dag 2-3)
+### Phase 2: Account Management ✅
 
 4. **Account endpoint calls**
-   - `POST /acme/new-account`
-   - JWS signing van account requests
-   - Account key management
+   - `POST /acme/new-account` — create account
+   - `POST-as-GET` on account URL — load existing account
+   - JWS signing with EC P-256 (ES256)
+   - Account key generation and loading
 
-### Fase 3: Authorization & Challenges (Dag 3-4)
+### Phase 3: Authorization & Challenges ✅
 
 5. **Authorization endpoint**
-   - `POST /acme/new-authz`
+   - `POST-as-GET /acme/authz-v3/{id}` — fetch authorization
    - Challenge object parsing
-   - Challenge status tracking
 
 6. **Challenge types**
-   - HTTP-01 manager
-   - DNS-01 manager
-   - TLS-ALPN-01 manager (RFC 8737)
+   - HTTP-01: `GetHttpChallengeValue(token)`
+   - DNS-01: `GetDnsChallengeValue(token)`, `GetDnsValidationDomain(domain)`
+   - TLS-ALPN-01: `GenerateTlsAlpnCertificate(domain, token)` (RFC 8737)
 
-### Fase 4: Certificate Issuance (Dag 4-5)
+### Phase 4: Certificate Issuance ✅
 
-7. **Certificate endpoint**
-   - `POST /acme/new-cert`
-   - Certificate bundle parsing (CER + PFX/CRT+KEY)
-   - Nonce management voor ACME v2
+7. **Order finalization**
+   - `POST /acme/new-order` — create order
+   - CSR generation with SAN extensions
+   - `POST /acme/order/{id}/finalize` — submit CSR
+   - PEM certificate download
+   - Certificate revocation (RFC 8555 §7.6)
+   - Account deactivation (RFC 8555 §7.3.6)
 
-### Fase 5: Testing (Dag 5-6)
+### Phase 5: Testing & Documentation ✅
 
-8. **Playground usage**
-   - Test scenarios voor elke challenge type
-   - Mock storage implementation in playground project
+8. **Playground application**
+   - Minimal ASP.NET Core web app for HTTP-01 challenge hosting
+   - `AcmeChallengeTokenStore` + `AcmeChallengeExtensions`
+   - Full end-to-end workflow demonstration
+   - `InMemoryAcmeStorage` for demo/testing
 
 9. **Documentation**
-   - API documentation
-   - Usage examples
-   - Troubleshooting guide
+   - `README.md` with usage examples
+   - XML documentation on all public APIs
+   - English comments throughout
 
-## Technische Specificaties
+## Technical Specifications
 
 ### JSON Serialization
 
-Let's Encrypt gebruikt een custom formatter met `protected`, `payload`, `signature` fields:
+Let's Encrypt uses a custom format with `protected`, `payload`, `signature` fields (RFC 7515 flattened JSON serialization):
 
 ```csharp
-[JsonPropertyName("protected")]
-public string JwsProtected { get; set; }
-
-[JsonPropertyName("payload")]
-public string Payload => JsonConvert.SerializeObject(JwePayload);
-
-[JsonPropertyName("signature")]
-public string Signature { get; set; }
+return JsonSerializer.Serialize(new
+{
+    @protected = protectedB64,
+    payload    = payloadB64,
+    signature  = signatureB64,
+});
 ```
 
-### JWS/JWE Implementatie
+### JWS Implementation
 
-**Custom JWS implementatie**: Compacte class met ECDSA/RS256 signing via `System.Security.Cryptography`. Base64Url encoding conform RFC 7515.
+**Custom JWS implementation** in `JwtHelper`:
+- ECDSA P-256 (ES256) signing via `System.Security.Cryptography`
+- Base64Url encoding as per RFC 7515
+- JWK thumbprint computation as per RFC 7638
+- No external dependencies
 
 ### Directory Endpoint Discovery
 
 Let's Encrypt directory:
 ```
-https://acme-v02.api.letsencrypt.org/directory
+https://acme-v02.api.letsencrypt.org/directory   (production)
+https://acme-staging-v02.api.letsencrypt.org/directory  (staging)
 ```
 
-Ondersteund metadata:
-- `newAccount` / `newAuthz` endpoints voor ACME v2
-- `newNonce` endpoint voor nonce management
-- `revokeCert` / `deactivate*` endpoints voor cleanup
+### TLS-ALPN-01 Certificate
 
-### TLS ALPN Certificate
+For TLS-ALPN-01, the library uses standard .NET capabilities:
+- `System.Security.Cryptography.X509Certificates` for certificate generation
+- `acmeIdentifier` extension via custom OID `1.3.6.1.5.5.7.1.31` (RFC 8737 §3)
+- Self-signed certificate with SHA-256 digest of key authorization
 
-Voor TLS-ALPN-01 zal we **standaard .NET capabilities** gebruiken:
-- `System.Security.Cryptography.X509Certificates` voor certificate generatie
-- `acmeIdentifier` extensie via custom OID (31)
-- Self-signed cert met SHA-256 digest van key authorization
+### Error Handling & Retry
 
-## Technisch Gedetailleerd
+Built-in retry policy via `AcmeRetryConfig`:
+- Exponential backoff (configurable, default 3 attempts)
+- Configurable timeout per request
+- Automatic retry on HTTP 5xx errors
 
-### 1. JWS Implementatie (Custom)
+### Nonce Management
 
-Een zelfgeschreven class die:
-- ECDSA/RSA signing met `System.Security.Cryptography`
-- Base64Url encoding conform RFC 7515
-- Compacte implementation, geen externe dependencies
-
-### 2. Error Handling & Retry
-
-De library bouwt **ingebouwde retry policies** in:
-- Exponential backoff (3 pogingen standaard)
-- Timeout configuratie per endpoint
-- Retry alleen op HTTP 429 (rate limit), 5xx errors
-
-### 3. Multi-threading & Concurrent Access
-
-De client maakt **read-only access** mogelijk op accounts/certificaten:
-- Accounts/keys zijn readonly voor concurrente reads
-- Writes (status updates) gebeuren via storage interface, niet binnen client
-- Externe app beheret concurrente write toegang
-
-### 4. Logging
-
-Serilog integration via `ILogger` interface:
-- `ILogger<LakerfieldAcmeClient>` injectie
-- Opties voor Console logging als fallback
-
-## Directory Endpoint Discovery
-
-## Volgende Stappen
-
-1. Geef antwoord bovenstaande open vragen
-2. Review het plan.md document
-3. Goedkeuring van architectuur beslissingen
-4. Start implementatie met Fase 1
+- Nonces are cached from previous responses (`Replay-Nonce` header)
+- `GetNonceAsync()` fetches a fresh nonce via HEAD on `newNonce` endpoint
+- `ConsumeNonceAsync()` reuses the cached nonce or fetches a new one
 
 ---
 
-*Losse ACME library zonder YARP dependencies - externe app stuurt logica aan*
+*Standalone ACME library without YARP dependencies — the host application drives all logic.*
+

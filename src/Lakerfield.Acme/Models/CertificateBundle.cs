@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Certificate Bundle conform RFC 8555 §7.5
+/// ACME Certificate Bundle as per RFC 8555 §7.5
 /// Contains private key and certificate chain
 /// </summary>
 public class CertificateBundle

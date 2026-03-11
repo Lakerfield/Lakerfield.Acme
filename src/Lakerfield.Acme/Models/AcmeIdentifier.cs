@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// ACME Identifier object conform RFC 8555 §9.7.7
+/// ACME Identifier object as per RFC 8555 §9.7.7
 /// </summary>
 public class AcmeIdentifier
 {

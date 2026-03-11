@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lakerfield.Acme.Models;
 
 /// <summary>
-/// JWS (JSON Web Signature) conform RFC 7515 and ACME specification
+/// JWS (JSON Web Signature) as per RFC 7515 and ACME specification
 /// </summary>
 public class Jws
 {

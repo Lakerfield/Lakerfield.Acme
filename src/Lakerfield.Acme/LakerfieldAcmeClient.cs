@@ -13,8 +13,8 @@ using Lakerfield.Acme.Models;
 namespace Lakerfield.Acme;
 
 /// <summary>
-/// ACME client voor communicatie met Let's Encrypt (en andere RFC 8555 compatible servers).
-/// Losse library zonder DI dependencies - externe app stuurt logica.
+/// ACME client for communicating with Let's Encrypt (and other RFC 8555 compatible servers).
+/// Standalone library without DI dependencies — the host application controls all logic.
 /// </summary>
 public class LakerfieldAcmeClient : IDisposable
 {
@@ -34,17 +34,17 @@ public class LakerfieldAcmeClient : IDisposable
   };
 
   /// <summary>
-  /// ACME directory URL (standaard: Let's Encrypt productie)
+  /// ACME directory URL (default: Let's Encrypt production)
   /// </summary>
   public string AcmeServerUrl { get; set; } = "https://acme-v02.api.letsencrypt.org/directory";
 
   /// <summary>
-  /// Huidig geladen ACME account.
+  /// Currently loaded ACME account.
   /// </summary>
   public Account? Account => _account;
 
   /// <summary>
-  /// Parsed ACME directory met endpoint URLs.
+  /// Parsed ACME directory with endpoint URLs.
   /// </summary>
   public AcmeDirectory? Directory => _directory;
 
@@ -59,7 +59,7 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Factory methode zonder explicit HttpClient - gebruikt default HttpClient.
+  /// Factory overload without an explicit HttpClient — uses a default HttpClient instance.
   /// </summary>
   public LakerfieldAcmeClient(IAcmeStorage storage, AcmeRetryConfig? retryPolicy = null)
     : this(new HttpClient(), storage, retryPolicy)
@@ -69,8 +69,8 @@ public class LakerfieldAcmeClient : IDisposable
   // ─── Directory & Nonce ───────────────────────────────────────────────────
 
   /// <summary>
-  /// Laad ACME directory endpoint en parseer de endpoint URLs.
-  /// Moet aangeroepen worden voor het gebruik van de client.
+  /// Loads the ACME directory endpoint and parses the endpoint URLs.
+  /// Must be called before using any other client methods.
   /// </summary>
   public async Task LoadDirectoryAsync()
   {
@@ -83,7 +83,7 @@ public class LakerfieldAcmeClient : IDisposable
     _directory = JsonSerializer.Deserialize<AcmeDirectory>(content, _jsonOptions)
       ?? throw new AcmeException("Failed to parse ACME directory response");
 
-    // Extraheer een nonce uit de response als die er is
+    // Extract a nonce from the response if present
     if (response.Headers.TryGetValues("Replay-Nonce", out var nonceValues))
     {
       foreach (var nonce in nonceValues)
@@ -95,7 +95,7 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Haal een nieuwe nonce op van de ACME server (HEAD request op newNonce endpoint).
+  /// Fetches a new nonce from the ACME server (HEAD request on the newNonce endpoint).
   /// </summary>
   private async Task<string> GetNonceAsync()
   {
@@ -115,7 +115,7 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Haal de huidige nonce op (hergebruik of vraag een nieuwe op).
+  /// Returns the current nonce (reuses the cached one or fetches a new one).
   /// </summary>
   private async Task<string> ConsumeNonceAsync()
   {
@@ -131,8 +131,8 @@ public class LakerfieldAcmeClient : IDisposable
   // ─── Account management ──────────────────────────────────────────────────
 
   /// <summary>
-  /// Genereer een nieuw EC P-256 sleutelpaar en sla de private key op.
-  /// Retourneert de PKCS#8 DER-encoded private key bytes.
+  /// Generates a new EC P-256 key pair and stores the private key.
+  /// Returns the PKCS#8 DER-encoded private key bytes.
   /// </summary>
   public byte[] GenerateAccountKey()
   {
@@ -142,7 +142,7 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Laad een bestaande EC P-256 private key (PKCS#8 DER-encoded).
+  /// Loads an existing EC P-256 private key (PKCS#8 DER-encoded).
   /// </summary>
   public void LoadAccountKey(byte[] pkcs8PrivateKey)
   {
@@ -152,12 +152,12 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Maak een nieuw ACME account aan met een gegenereerde EC P-256 key.
-  /// Optioneel kan een email adres opgegeven worden voor notificaties.
+  /// Creates a new ACME account with a generated EC P-256 key.
+  /// An email address can optionally be provided for notifications.
   /// </summary>
-  /// <param name="email">Optioneel email adres voor Let's Encrypt notificaties</param>
-  /// <param name="termsOfServiceAgreed">True om akkoord te gaan met de ToS (vereist door Let's Encrypt)</param>
-  /// <returns>Het aangemaakte Account object met URL</returns>
+  /// <param name="email">Optional email address for Let's Encrypt notifications</param>
+  /// <param name="termsOfServiceAgreed">True to agree to the Terms of Service (required by Let's Encrypt)</param>
+  /// <returns>The created Account object with URL</returns>
   public async Task<Account> CreateAccountAsync(string? email = null, bool termsOfServiceAgreed = true)
   {
     EnsureDirectoryLoaded();
@@ -181,12 +181,12 @@ public class LakerfieldAcmeClient : IDisposable
     var account = JsonSerializer.Deserialize<Account>(accountJson, _jsonOptions)
       ?? throw new AcmeException("Failed to parse account response");
 
-    // Account URL zit in de Location header
+    // Account URL is in the Location header
     account.Url = response.Headers.Location?.AbsoluteUri
       ?? throw new AcmeException("ACME server did not return account URL in Location header");
     account.Id = account.Url;
 
-    // Sla de nonce op voor het volgende request
+    // Store the nonce for the next request
     ExtractNonce(response);
 
     _account = account;
@@ -194,16 +194,16 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Laad een bestaand ACME account op basis van een account URL en private key.
+  /// Loads an existing ACME account based on an account URL and private key.
   /// </summary>
-  /// <param name="accountUrl">Account URL (bijv. https://acme-v02.api.letsencrypt.org/acme/acct/123)</param>
+  /// <param name="accountUrl">Account URL (e.g. https://acme-v02.api.letsencrypt.org/acme/acct/123)</param>
   /// <param name="pkcs8PrivateKey">PKCS#8 DER-encoded private key</param>
   public async Task<Account> LoadAccountAsync(string accountUrl, byte[] pkcs8PrivateKey)
   {
     EnsureDirectoryLoaded();
     LoadAccountKey(pkcs8PrivateKey);
 
-    // POST-as-GET om account info op te halen
+    // POST-as-GET to retrieve account info
     var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
     var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, accountUrl, nonce, accountUrl, null);
 
@@ -224,10 +224,10 @@ public class LakerfieldAcmeClient : IDisposable
   // ─── Order management ────────────────────────────────────────────────────
 
   /// <summary>
-  /// Maak een nieuw certificaatverzoek (order) voor een of meer domeinen.
+  /// Creates a new certificate order for one or more domains.
   /// </summary>
-  /// <param name="domains">Lijst van domeinnamen (bijv. ["example.com", "www.example.com"])</param>
-  /// <returns>AcmeOrder met authorization URLs</returns>
+  /// <param name="domains">List of domain names (e.g. ["example.com", "www.example.com"])</param>
+  /// <returns>AcmeOrder with authorization URLs</returns>
   public async Task<AcmeOrder> CreateOrderAsync(params string[] domains)
   {
     EnsureDirectoryLoaded();
@@ -261,7 +261,7 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Haal de huidige status van een order op.
+  /// Retrieves the current status of an order.
   /// </summary>
   public async Task<AcmeOrder> GetOrderAsync(string orderUrl)
   {
@@ -284,7 +284,7 @@ public class LakerfieldAcmeClient : IDisposable
   // ─── Authorization & Challenge ───────────────────────────────────────────
 
   /// <summary>
-  /// Haal een authorization op van de ACME server.
+  /// Retrieves an authorization from the ACME server.
   /// </summary>
   public async Task<Authorization> GetAuthorizationAsync(string authzUrl)
   {
@@ -306,7 +306,7 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Bereken de key authorization voor een challenge token.
+  /// Computes the key authorization for a challenge token.
   /// keyAuthorization = token + "." + base64url(SHA256(canonicalJwkJson))
   /// </summary>
   public string GetKeyAuthorization(string token)
@@ -316,8 +316,8 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Bereken de HTTP-01 challenge waarde (= key authorization).
-  /// Deze waarde moet beschikbaar zijn op http://&lt;domain&gt;/.well-known/acme-challenge/&lt;token&gt;
+  /// Computes the HTTP-01 challenge value (= key authorization).
+  /// This value must be served at http://&lt;domain&gt;/.well-known/acme-challenge/&lt;token&gt;
   /// </summary>
   public string GetHttpChallengeValue(string token)
   {
@@ -325,8 +325,8 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Bereken de DNS-01 challenge waarde (= base64url(SHA256(keyAuthorization))).
-  /// Deze waarde moet als TXT record op _acme-challenge.&lt;domain&gt; staan.
+  /// Computes the DNS-01 challenge value (= base64url(SHA256(keyAuthorization))).
+  /// This value must be set as a TXT record on _acme-challenge.&lt;domain&gt;
   /// </summary>
   public string GetDnsChallengeValue(string token)
   {
@@ -335,20 +335,20 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Genereer de DNS-01 validatiedomeinnaam voor een domein.
-  /// Voor wildcard *.example.com is dit _acme-challenge.example.com.
+  /// Generates the DNS-01 validation domain name for a given domain.
+  /// For wildcard *.example.com this is _acme-challenge.example.com.
   /// </summary>
   public static string GetDnsValidationDomain(string domain)
   {
-    // Strip wildcard prefix indien aanwezig
+    // Strip wildcard prefix if present
     var baseDomain = domain.StartsWith("*.") ? domain[2..] : domain;
     return $"_acme-challenge.{baseDomain}";
   }
 
   /// <summary>
-  /// Genereer een self-signed TLS-ALPN-01 certificate voor een domein conform RFC 8737.
-  /// Het certificaat bevat de acmeIdentifier extensie (OID 1.3.6.1.5.5.7.1.31)
-  /// met de SHA-256 digest van de key authorization.
+  /// Generates a self-signed TLS-ALPN-01 certificate for a domain as per RFC 8737.
+  /// The certificate contains the acmeIdentifier extension (OID 1.3.6.1.5.5.7.1.31)
+  /// with the SHA-256 digest of the key authorization.
   /// </summary>
   public X509Certificate2 GenerateTlsAlpnCertificate(string domain, string token)
   {
@@ -360,13 +360,13 @@ public class LakerfieldAcmeClient : IDisposable
     using var certKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
     var req = new CertificateRequest($"CN={domain}", certKey, HashAlgorithmName.SHA256);
 
-    // Subject Alternative Name met het domein
+    // Subject Alternative Name with the domain
     var sanBuilder = new SubjectAlternativeNameBuilder();
     sanBuilder.AddDnsName(domain);
     req.CertificateExtensions.Add(sanBuilder.Build());
 
-    // acmeIdentifier extensie (OID 1.3.6.1.5.5.7.1.31) conform RFC 8737 §3
-    // Waarde: DER OCTET STRING met SHA-256 van key authorization
+    // acmeIdentifier extension (OID 1.3.6.1.5.5.7.1.31) as per RFC 8737 §3
+    // Value: DER OCTET STRING with SHA-256 of key authorization
     var extValue = new byte[34];
     extValue[0] = 0x04; // OCTET STRING tag
     extValue[1] = 0x20; // length 32
@@ -380,15 +380,15 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Zeg tegen de ACME server dat de challenge klaar is voor validatie.
-  /// Roep dit aan nadat je de challenge provisioned hebt (HTTP bestand, DNS record, TLS cert).
+  /// Notifies the ACME server that the challenge is ready for validation.
+  /// Call this after provisioning the challenge (HTTP file, DNS record, TLS certificate).
   /// </summary>
   public async Task ValidateChallengeAsync(string challengeUrl)
   {
     EnsureAccountLoaded();
 
     var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
-    // Lege JSON payload ({}) om aan te geven dat we klaar zijn
+    // Empty JSON payload ({}) to indicate we are ready
     var payloadJson = "{}";
     var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, challengeUrl, payloadJson);
 
@@ -397,8 +397,8 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Wacht tot een challenge de status "valid" of "invalid" heeft.
-  /// Poll elke 2 seconden met exponential backoff.
+  /// Waits until a challenge reaches the status "valid" or "invalid".
+  /// Polls with exponential backoff.
   /// </summary>
   public async Task<Challenge> WaitForChallengeValidAsync(string challengeUrl, CancellationToken cancellationToken = default)
   {
@@ -438,7 +438,7 @@ public class LakerfieldAcmeClient : IDisposable
   // ─── Certificate issuance ────────────────────────────────────────────────
 
   /// <summary>
-  /// Wacht tot een order de status "ready" heeft (alle authorizations zijn valid).
+  /// Waits until an order reaches the status "ready" (all authorizations are valid).
   /// </summary>
   public async Task<AcmeOrder> WaitForOrderReadyAsync(string orderUrl, CancellationToken cancellationToken = default)
   {
@@ -463,13 +463,13 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Finaliseer een order door een CSR in te dienen.
-  /// Genereert automatisch een nieuw EC P-256 sleutelpaar voor het certificaat.
+  /// Finalizes an order by submitting a CSR.
+  /// Automatically generates a new EC P-256 key pair for the certificate.
   /// </summary>
-  /// <param name="order">De order om te finaliseren</param>
-  /// <param name="domains">Domeinnamen voor het certificaat (SAN)</param>
-  /// <param name="certKey">Optioneel EC sleutelpaar voor het certificaat; nieuw sleutelpaar wordt gegenereerd als null</param>
-  /// <returns>Updated order met certificate URL</returns>
+  /// <param name="order">The order to finalize</param>
+  /// <param name="domains">Domain names for the certificate (SAN)</param>
+  /// <param name="certKey">Optional EC key pair for the certificate; a new key pair is generated when null</param>
+  /// <returns>Updated order with certificate URL</returns>
   public async Task<(AcmeOrder Order, byte[] CertificatePrivateKey)> FinalizeOrderAsync(
     AcmeOrder order,
     string[] domains,
@@ -482,7 +482,7 @@ public class LakerfieldAcmeClient : IDisposable
 
     try
     {
-      // Genereer CSR
+      // Generate CSR
       var csrBytes = GenerateCsr(domains, certKey);
       var csrB64 = JwtHelper.Encode(csrBytes);
 
@@ -511,7 +511,7 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Wacht tot een order is verwerkt en download daarna het certificaat.
+  /// Waits until an order has been processed and its certificate is ready to download.
   /// </summary>
   public async Task<AcmeOrder> WaitForOrderValidAsync(string orderUrl, CancellationToken cancellationToken = default)
   {
@@ -536,9 +536,9 @@ public class LakerfieldAcmeClient : IDisposable
   }
 
   /// <summary>
-  /// Download het certificaat van een voltooide order.
+  /// Downloads the certificate from a completed order.
   /// </summary>
-  /// <returns>PEM-encoded certificaatketen</returns>
+  /// <returns>PEM-encoded certificate chain</returns>
   public async Task<string> DownloadCertificateAsync(AcmeOrder order)
   {
     if (order.Certificate == null)
@@ -558,10 +558,10 @@ public class LakerfieldAcmeClient : IDisposable
   // ─── Certificate revocation ──────────────────────────────────────────────
 
   /// <summary>
-  /// Revoceer een certificaat conform RFC 8555 §7.6.
+  /// Revokes a certificate as per RFC 8555 §7.6.
   /// </summary>
-  /// <param name="certDer">DER-encoded certificaat</param>
-  /// <param name="reason">Optionele revocation reason code (RFC 5280 CRL reason codes)</param>
+  /// <param name="certDer">DER-encoded certificate</param>
+  /// <param name="reason">Optional revocation reason code (RFC 5280 CRL reason codes)</param>
   public async Task RevokeCertificateAsync(byte[] certDer, int? reason = null)
   {
     EnsureDirectoryLoaded();
@@ -583,7 +583,7 @@ public class LakerfieldAcmeClient : IDisposable
   // ─── Account deactivation ────────────────────────────────────────────────
 
   /// <summary>
-  /// Deactiveer het huidige account conform RFC 8555 §7.3.6.
+  /// Deactivates the current account as per RFC 8555 §7.3.6.
   /// </summary>
   public async Task DeactivateAccountAsync()
   {
@@ -629,7 +629,7 @@ public class LakerfieldAcmeClient : IDisposable
     {
       var errorBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
-      // Probeer ACME error te parsen
+      // Attempt to parse the ACME error
       AcmeError? acmeError = null;
       try
       {
@@ -637,7 +637,7 @@ public class LakerfieldAcmeClient : IDisposable
       }
       catch
       {
-        // Negeer parse fouten
+        // Ignore parse errors
       }
 
       var message = acmeError?.Detail ?? errorBody;

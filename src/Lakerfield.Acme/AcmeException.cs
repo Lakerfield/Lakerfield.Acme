@@ -3,12 +3,12 @@ using System.Text.Json;
 namespace Lakerfield.Acme;
 
 /// <summary>
-/// ACME exception voor errors in ACME protocol.
+/// Exception for errors in the ACME protocol.
 /// </summary>
 public class AcmeException : System.Exception
 {
   /// <summary>
-  /// Parse ACME error response tot AcmeError object.
+  /// Parses the ACME error response into an AcmeError object.
   /// </summary>
   public AcmeError? Error => JsonSerializer.Deserialize<AcmeError>(Message);
 
@@ -22,7 +22,7 @@ public class AcmeException : System.Exception
 }
 
 /// <summary>
-/// ACME Client Error conform RFC 8555 Appendix C
+/// ACME Client Error as per RFC 8555 Appendix C
 /// </summary>
 public class AcmeError
 {
