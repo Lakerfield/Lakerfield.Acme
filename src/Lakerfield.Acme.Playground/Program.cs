@@ -15,7 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 // This example demonstrates the complete ACME workflow:
 // 1. Create an account
 // 2. Place an order for a domain
-// 3. Provision the challenge (HTTP-01)
+// 3. Provision the challenge (HTTP-01 or DNS-01)
 // 4. Validate the challenge
 // 5. Download the certificate
 //
@@ -24,11 +24,21 @@ using Microsoft.Extensions.DependencyInjection;
 //
 // NOTE: The minimal ASP.NET Core web app listens on 0.0.0.0:80 for HTTP-01 validation.
 // On Linux/macOS, listening on port 80 requires elevated privileges (e.g. sudo or CAP_NET_BIND_SERVICE).
+//
+// NOTE: For DNS-01 validation the local DNS server listens on 0.0.0.0:53.
+// On Linux/macOS, listening on port 53 requires elevated privileges (e.g. sudo or CAP_NET_BIND_SERVICE).
 // ─────────────────────────────────────────────────────────────────────────────
 
 var adminEmail = "admin@example.com";
 var testDomain = "example.com";
 var acmeDomain = "acme.validation-domain.com";
+
+// ─── Challenge type selection ─────────────────────────────────────────────────
+// Set to "http-01" to use HTTP-01 validation (requires port 80).
+// Set to "dns-01"  to use DNS-01  validation (requires the local DNS server on port 53).
+var challengeType = "http-01";
+if (challengeType != "http-01" && challengeType != "dns-01")
+  throw new ArgumentException($"Invalid challengeType '{challengeType}'. Must be \"http-01\" or \"dns-01\".");
 
 // ─── Minimal ASP.NET Core web app for hosting HTTP-01 challenges ─────────────
 var builder = WebApplication.CreateBuilder(args);
@@ -146,7 +156,7 @@ try
         dnsChallenge = challenge;
     }
 
-    if (httpChallenge != null)
+    if (challengeType == "http-01" && httpChallenge != null)
     {
       var token = httpChallenge.Token!;
       var keyAuthValue = client.GetHttpChallengeValue(token);
@@ -174,15 +184,14 @@ try
       tokenStore.RemoveToken(token);
     }
 
-    // DNS-01 example
-    if (dnsChallenge != null)
+    if (challengeType == "dns-01" && dnsChallenge != null)
     {
       var dnsValue = dnsChallenge.Token != null
         ? client.GetDnsChallengeValue(dnsChallenge.Token!)
         : "n/a";
       var dnsDomain = LakerfieldAcmeClient.GetDnsValidationDomain(authz.Identifier);
       var forwardedTxtRecord = $"{dnsDomain.Replace(".", "-")}.{acmeDomain}";
-      Console.WriteLine($"  DNS-01 (as alternative):");
+      Console.WriteLine($"  DNS-01 Challenge:");
       Console.WriteLine($"    TXT record domain: {dnsDomain}");
       Console.WriteLine($"    TXT record value:  {dnsValue}");
       Console.WriteLine($"    TXT record:        _acme-challenge.{dnsDomain.TrimEnd('.')}");
