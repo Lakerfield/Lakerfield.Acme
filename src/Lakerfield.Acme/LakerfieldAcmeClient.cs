@@ -227,9 +227,15 @@ public class LakerfieldAcmeClient : IDisposable
   /// Creates a new certificate order for one or more domains.
   /// </summary>
   /// <param name="domains">List of domain names (e.g. ["example.com", "www.example.com"])</param>
-  /// <returns>AcmeOrder with authorization URLs</returns>
-  public async Task<AcmeOrder> CreateOrderAsync(params string[] domains)
+  /// <param name="challengeType">The preferred challenge type to use for this order ("http-01" or "dns-01")</param>
+  /// <returns>AcmeOrder with authorization URLs and the preferred challenge type</returns>
+  public async Task<AcmeOrder> CreateOrderAsync(string[] domains, string challengeType = "http-01")
   {
+    if (challengeType != "http-01" && challengeType != "dns-01")
+      throw new ArgumentException(
+        $"Invalid challengeType '{challengeType}'. Supported values are \"http-01\" and \"dns-01\".",
+        nameof(challengeType));
+
     EnsureDirectoryLoaded();
     EnsureAccountLoaded();
 
@@ -255,6 +261,7 @@ public class LakerfieldAcmeClient : IDisposable
       ?? throw new AcmeException("Failed to parse order response");
 
     order.Url = response.Headers.Location?.AbsoluteUri ?? string.Empty;
+    order.PreferredChallengeType = challengeType;
 
     ExtractNonce(response);
     return order;
