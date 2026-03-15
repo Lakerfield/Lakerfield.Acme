@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -14,8 +15,8 @@ using Microsoft.Extensions.DependencyInjection;
 //
 // This example demonstrates the complete ACME workflow:
 // 1. Create an account
-// 2. Place an order for a domain
-// 3. Provision the challenge (HTTP-01)
+// 2. Place an order for a domain (with the preferred challenge type)
+// 3. Provision the challenge (HTTP-01 or DNS-01)
 // 4. Validate the challenge
 // 5. Download the certificate
 //
@@ -24,11 +25,22 @@ using Microsoft.Extensions.DependencyInjection;
 //
 // NOTE: The minimal ASP.NET Core web app listens on 0.0.0.0:80 for HTTP-01 validation.
 // On Linux/macOS, listening on port 80 requires elevated privileges (e.g. sudo or CAP_NET_BIND_SERVICE).
+//
+// NOTE: For DNS-01 validation the local DNS server listens on 0.0.0.0:53.
+// On Linux/macOS, listening on port 53 requires elevated privileges (e.g. sudo or CAP_NET_BIND_SERVICE).
 // ─────────────────────────────────────────────────────────────────────────────
 
 var adminEmail = "admin@example.com";
 var testDomain = "example.com";
 var acmeDomain = "acme.validation-domain.com";
+
+// ─── Challenge type selection ─────────────────────────────────────────────────
+// Set to "http-01" to use HTTP-01 validation (requires port 80).
+// Set to "dns-01"  to use DNS-01  validation (requires the local DNS server on port 53).
+// This is passed to CreateOrderAsync so the preferred type travels with the order.
+var challengeType = "http-01";
+if (challengeType != "http-01" && challengeType != "dns-01")
+  throw new ArgumentException($"Invalid challengeType '{challengeType}'. Must be \"http-01\" or \"dns-01\".");
 
 // ─── Minimal ASP.NET Core web app for hosting HTTP-01 challenges ─────────────
 var builder = WebApplication.CreateBuilder(args);
@@ -115,15 +127,19 @@ try
   Console.WriteLine();
 
   // Step 3: Create an order for a domain
+  // The preferred challenge type is passed here so it travels with the order.
   var domain = testDomain;
-  Console.WriteLine($"Step 3: Creating order for {domain}...");
-  var order = await client.CreateOrderAsync(domain);
+  Console.WriteLine($"Step 3: Creating order for {domain} (challenge type: {challengeType})...");
+  var order = await client.CreateOrderAsync(new[] { domain }, challengeType);
   Console.WriteLine($"  Order URL: {order.Url}");
   Console.WriteLine($"  Order status: {order.Status}");
+  Console.WriteLine($"  Preferred challenge type: {order.PreferredChallengeType}");
   Console.WriteLine($"  Authorizations: {order.Authorizations.Count}");
   Console.WriteLine();
 
-  // Step 4: Process each authorization
+  // Step 4: Process each authorization.
+  // Let's Encrypt returns all supported challenge types; we pick the one that
+  // matches the preferred type set on the order.
   Console.WriteLine("Step 4: Processing authorizations...");
   foreach (var authzUrl in order.Authorizations)
   {
@@ -132,23 +148,21 @@ try
     Console.WriteLine($"  Domain: {authz.Identifier}");
     Console.WriteLine($"  Status: {authz.Status}");
 
-    Challenge? httpChallenge = null;
-    Challenge? dnsChallenge = null;
     foreach (var challenge in authz.Challenges)
-    {
       Console.WriteLine($"    Challenge type: {challenge.Type}, status: {challenge.Status}");
-      // Select the HTTP-01 challenge
-      if (challenge.Type == "http-01")
-        httpChallenge = challenge;
 
-      // Select the DNS-01 challenge
-      if (challenge.Type == "dns-01")
-        dnsChallenge = challenge;
-    }
+    // Pick the challenge that matches the type preferred when placing the order.
+    var selectedChallenge = authz.Challenges.FirstOrDefault(c => c.Type == order.PreferredChallengeType)
+      ?? throw new InvalidOperationException(
+           $"No {order.PreferredChallengeType} challenge returned by ACME server for {authz.Identifier}. " +
+           $"Available types: {string.Join(", ", authz.Challenges.Select(c => c.Type))}");
 
-    if (httpChallenge != null)
+    // Provision the selected challenge (type-specific setup).
+    Action cleanup = () => { };
+
+    if (order.PreferredChallengeType == "http-01")
     {
-      var token = httpChallenge.Token!;
+      var token = selectedChallenge.Token!;
       var keyAuthValue = client.GetHttpChallengeValue(token);
       var challengeUrl = $"http://{authz.Identifier}/.well-known/acme-challenge/{token}";
 
@@ -162,47 +176,41 @@ try
       Console.WriteLine($"    http://{authz.Identifier}/.well-known/acme-challenge/{token}");
       Console.WriteLine();
 
-      // Register the token with the local web app so the ACME server can fetch it.
       tokenStore.AddToken(token, keyAuthValue);
-
-      Console.WriteLine($"  Validating challenge...");
-      await client.ValidateChallengeAsync(httpChallenge.Url!);
-      Console.WriteLine($"  Waiting for challenge validation...");
-      var validatedChallenge = await client.WaitForChallengeValidAsync(httpChallenge.Url!);
-      Console.WriteLine($"  Challenge status: {validatedChallenge.Status}");
-
-      tokenStore.RemoveToken(token);
+      cleanup = () => tokenStore.RemoveToken(token);
     }
-
-    // DNS-01 example
-    if (dnsChallenge != null)
+    else if (order.PreferredChallengeType == "dns-01")
     {
-      var dnsValue = dnsChallenge.Token != null
-        ? client.GetDnsChallengeValue(dnsChallenge.Token!)
+      var dnsValue = selectedChallenge.Token != null
+        ? client.GetDnsChallengeValue(selectedChallenge.Token!)
         : "n/a";
       var dnsDomain = LakerfieldAcmeClient.GetDnsValidationDomain(authz.Identifier);
       var forwardedTxtRecord = $"{dnsDomain.Replace(".", "-")}.{acmeDomain}";
-      Console.WriteLine($"  DNS-01 (as alternative):");
+
+      Console.WriteLine();
+      Console.WriteLine($"  DNS-01 Challenge:");
       Console.WriteLine($"    TXT record domain: {dnsDomain}");
       Console.WriteLine($"    TXT record value:  {dnsValue}");
       Console.WriteLine($"    TXT record:        _acme-challenge.{dnsDomain.TrimEnd('.')}");
       Console.WriteLine($"    TXT forwarded:     {forwardedTxtRecord}");
+      Console.WriteLine();
 
-      // Register the token with the local dns so the ACME server can fetch it.
       dnsStore.SetTxtRecord(
         forwardedTxtRecord,
         dnsValue,
         ttl: 30,
         validFor: TimeSpan.FromMinutes(10));
-
-      Console.WriteLine($"  Validating challenge...");
-      await client.ValidateChallengeAsync(dnsChallenge.Url!);
-      Console.WriteLine($"  Waiting for challenge validation...");
-      var validatedChallenge = await client.WaitForChallengeValidAsync(dnsChallenge.Url!);
-      Console.WriteLine($"  Challenge status: {validatedChallenge.Status}");
-
-      dnsStore.RemoveRecord(forwardedTxtRecord);
+      cleanup = () => dnsStore.RemoveRecord(forwardedTxtRecord);
     }
+
+    // Notify the ACME server and wait for validation — same for all challenge types.
+    Console.WriteLine($"  Validating challenge...");
+    await client.ValidateChallengeAsync(selectedChallenge.Url!);
+    Console.WriteLine($"  Waiting for challenge validation...");
+    var validatedChallenge = await client.WaitForChallengeValidAsync(selectedChallenge.Url!);
+    Console.WriteLine($"  Challenge status: {validatedChallenge.Status}");
+
+    cleanup();
   }
 
   Console.WriteLine();

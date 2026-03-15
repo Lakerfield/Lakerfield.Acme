@@ -48,4 +48,12 @@ public class AcmeOrder
   /// Order URL (from Location header or request URL)
   /// </summary>
   public string? Url { get; set; }
+
+  /// <summary>
+  /// The preferred challenge type to use for this order (e.g. "http-01" or "dns-01").
+  /// This is a client-side preference set when creating the order; it is not part of
+  /// the ACME wire format.
+  /// </summary>
+  [JsonIgnore]
+  public string PreferredChallengeType { get; set; } = "http-01";
 }
