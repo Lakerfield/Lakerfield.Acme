@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Lakerfield.Acme;
@@ -27,16 +28,27 @@ using Microsoft.Extensions.DependencyInjection;
 
 var adminEmail = "admin@example.com";
 var testDomain = "example.com";
+var acmeDomain = "acme.validation-domain.com";
 
 // ─── Minimal ASP.NET Core web app for hosting HTTP-01 challenges ─────────────
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddAcmeHttp01Challenge();
+
+// DNS challenge server
+builder.Services.AddAcmeDnsServer(options =>
+{
+  options.BindAddress = IPAddress.Any;
+  options.Port = 53;
+  options.ZoneName = acmeDomain;
+  options.DefaultTtl = 30;
+});
 
 var webApp = builder.Build();
 webApp.Urls.Add("http://0.0.0.0:80");
 webApp.UseAcmeHttp01Challenge();
 
 var tokenStore = webApp.Services.GetRequiredService<AcmeChallengeTokenStore>();
+var dnsStore = webApp.Services.GetRequiredService<IAcmeDnsChallengeStore>();
 
 await webApp.StartAsync();
 
@@ -169,9 +181,27 @@ try
         ? client.GetDnsChallengeValue(dnsChallenge.Token!)
         : "n/a";
       var dnsDomain = LakerfieldAcmeClient.GetDnsValidationDomain(authz.Identifier);
+      var forwardedTxtRecord = $"{dnsDomain.Replace(".", "-")}.{acmeDomain}";
       Console.WriteLine($"  DNS-01 (as alternative):");
       Console.WriteLine($"    TXT record domain: {dnsDomain}");
       Console.WriteLine($"    TXT record value:  {dnsValue}");
+      Console.WriteLine($"    TXT record:        _acme-challenge.{dnsDomain.TrimEnd('.')}");
+      Console.WriteLine($"    TXT forwarded:     {forwardedTxtRecord}");
+
+      // Register the token with the local dns so the ACME server can fetch it.
+      dnsStore.SetTxtRecord(
+        forwardedTxtRecord,
+        dnsValue,
+        ttl: 30,
+        validFor: TimeSpan.FromMinutes(10));
+
+      Console.WriteLine($"  Validating challenge...");
+      await client.ValidateChallengeAsync(dnsChallenge.Url!);
+      Console.WriteLine($"  Waiting for challenge validation...");
+      var validatedChallenge = await client.WaitForChallengeValidAsync(dnsChallenge.Url!);
+      Console.WriteLine($"  Challenge status: {validatedChallenge.Status}");
+
+      dnsStore.RemoveRecord(forwardedTxtRecord);
     }
   }
 
