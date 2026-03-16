@@ -239,7 +239,7 @@ public class LakerfieldAcmeClient : IDisposable
       actualIdentifiers.Add(new Dictionary<string, string>
       {
         ["type"] = "dns",
-        ["value"] = domain.StartsWith("*.") ? domain[2..] : domain,
+        ["value"] = domain,
       });
     }
 
