@@ -181,12 +181,12 @@ try
         ? client.GetDnsChallengeValue(dnsChallenge.Token!)
         : "n/a";
       var dnsDomain = LakerfieldAcmeClient.GetDnsValidationDomain(authz.Identifier);
-      var forwardedTxtRecord = $"{dnsDomain.Replace(".", "-")}.{acmeDomain}";
+      var forwardLabel = LakerfieldAcmeClient.GetDnsValidationForwardLabel(authz.Identifier);
+      var forwardedTxtRecord = $"{forwardLabel}.{acmeDomain}";
       Console.WriteLine($"  DNS-01 (as alternative):");
-      Console.WriteLine($"    TXT record domain: {dnsDomain}");
-      Console.WriteLine($"    TXT record value:  {dnsValue}");
-      Console.WriteLine($"    TXT record:        _acme-challenge.{dnsDomain.TrimEnd('.')}");
-      Console.WriteLine($"    TXT forwarded:     {forwardedTxtRecord}");
+      Console.WriteLine($"    TXT record:         {dnsDomain}");
+      Console.WriteLine($"    TXT record value:   {dnsValue}");
+      Console.WriteLine($"    or CNAME forwarded: {forwardedTxtRecord}");
 
       // Register the token with the local dns so the ACME server can fetch it.
       dnsStore.SetTxtRecord(

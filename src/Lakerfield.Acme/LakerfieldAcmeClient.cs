@@ -239,7 +239,7 @@ public class LakerfieldAcmeClient : IDisposable
       actualIdentifiers.Add(new Dictionary<string, string>
       {
         ["type"] = "dns",
-        ["value"] = domain.StartsWith("*.") ? domain[2..] : domain,
+        ["value"] = domain,
       });
     }
 
@@ -343,6 +343,22 @@ public class LakerfieldAcmeClient : IDisposable
     // Strip wildcard prefix if present
     var baseDomain = domain.StartsWith("*.") ? domain[2..] : domain;
     return $"_acme-challenge.{baseDomain}";
+  }
+
+  /// <summary>
+  /// Generates the DNS-01 forward prefix validation domain name for a given domain.
+  /// For www.example.com this is www-example-com
+  /// For wildcard *.example.com this is example-com
+  /// </summary>
+  public static string GetDnsValidationForwardLabel(string domain)
+  {
+    // Strip wildcard prefix if present
+    var baseDomain = domain.StartsWith("*.") ? domain[2..] : domain;
+    return baseDomain
+      .Replace(".", "-")
+      .Replace("--", "-")
+      .Replace("--", "-")
+      .Trim('-');
   }
 
   /// <summary>
