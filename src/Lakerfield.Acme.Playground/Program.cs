@@ -14,20 +14,18 @@ using Microsoft.Extensions.DependencyInjection;
 //
 // This example demonstrates the complete ACME workflow:
 // 1. Create an account
-// 2. Place an order for a domain
+// 2. Place an order for a domain and wildcard
 // 3. Provision the challenge (HTTP-01)
-// 4. Validate the challenge
-// 5. Download the certificate
+// 4. Provision the challenge (DNS-01)
+// 5. Validate the challenge
+// 6. Download the certificate
 //
 // Let's Encrypt staging server: https://acme-staging-v02.api.letsencrypt.org/directory
 // Let's Encrypt production server: https://acme-v02.api.letsencrypt.org/directory
-//
-// NOTE: The minimal ASP.NET Core web app listens on 0.0.0.0:80 for HTTP-01 validation.
-// On Linux/macOS, listening on port 80 requires elevated privileges (e.g. sudo or CAP_NET_BIND_SERVICE).
 // ─────────────────────────────────────────────────────────────────────────────
 
 var adminEmail = "admin@example.com";
-var testDomain = "example.com";
+string[] testDomain = ["wildcard.example.com", "*.wildcard.example.com"];
 var acmeDomain = "acme.validation-domain.com";
 
 // ─── Minimal ASP.NET Core web app for hosting HTTP-01 challenges ─────────────
@@ -116,7 +114,7 @@ try
 
   // Step 3: Create an order for a domain
   var domain = testDomain;
-  Console.WriteLine($"Step 3: Creating order for {domain}...");
+  Console.WriteLine($"Step 3: Creating order for {string.Join(", ", domain)}...");
   var order = await client.CreateOrderAsync(domain);
   Console.WriteLine($"  Order URL: {order.Url}");
   Console.WriteLine($"  Order status: {order.Status}");
@@ -132,23 +130,28 @@ try
     Console.WriteLine($"  Domain: {authz.Identifier}");
     Console.WriteLine($"  Status: {authz.Status}");
 
-    Challenge? httpChallenge = null;
-    Challenge? dnsChallenge = null;
+    Challenge? http01Challenge = null;
+    Challenge? dns01Challenge = null;
+    Challenge? tlsAlpn01Challenge = null;
     foreach (var challenge in authz.Challenges)
     {
       Console.WriteLine($"    Challenge type: {challenge.Type}, status: {challenge.Status}");
       // Select the HTTP-01 challenge
       if (challenge.Type == "http-01")
-        httpChallenge = challenge;
+        http01Challenge = challenge;
 
       // Select the DNS-01 challenge
       if (challenge.Type == "dns-01")
-        dnsChallenge = challenge;
+        dns01Challenge = challenge;
+
+      // Select the TLS-ALPN-01 challenge
+      if (challenge.Type == "tls-alpn-01")
+        tlsAlpn01Challenge = challenge;
     }
 
-    if (httpChallenge != null)
+    if (http01Challenge != null)
     {
-      var token = httpChallenge.Token!;
+      var token = http01Challenge.Token!;
       var keyAuthValue = client.GetHttpChallengeValue(token);
       var challengeUrl = $"http://{authz.Identifier}/.well-known/acme-challenge/{token}";
 
@@ -166,19 +169,20 @@ try
       tokenStore.AddToken(token, keyAuthValue);
 
       Console.WriteLine($"  Validating challenge...");
-      await client.ValidateChallengeAsync(httpChallenge.Url!);
+      await client.ValidateChallengeAsync(http01Challenge.Url!);
       Console.WriteLine($"  Waiting for challenge validation...");
-      var validatedChallenge = await client.WaitForChallengeValidAsync(httpChallenge.Url!);
+      var validatedChallenge = await client.WaitForChallengeValidAsync(http01Challenge.Url!);
       Console.WriteLine($"  Challenge status: {validatedChallenge.Status}");
 
       tokenStore.RemoveToken(token);
+      continue;
     }
 
     // DNS-01 example
-    if (dnsChallenge != null)
+    if (dns01Challenge != null)
     {
-      var dnsValue = dnsChallenge.Token != null
-        ? client.GetDnsChallengeValue(dnsChallenge.Token!)
+      var dnsValue = dns01Challenge.Token != null
+        ? client.GetDnsChallengeValue(dns01Challenge.Token!)
         : "n/a";
       var dnsDomain = LakerfieldAcmeClient.GetDnsValidationDomain(authz.Identifier);
       var forwardLabel = LakerfieldAcmeClient.GetDnsValidationForwardLabel(authz.Identifier);
@@ -196,12 +200,19 @@ try
         validFor: TimeSpan.FromMinutes(10));
 
       Console.WriteLine($"  Validating challenge...");
-      await client.ValidateChallengeAsync(dnsChallenge.Url!);
+      await client.ValidateChallengeAsync(dns01Challenge.Url!);
       Console.WriteLine($"  Waiting for challenge validation...");
-      var validatedChallenge = await client.WaitForChallengeValidAsync(dnsChallenge.Url!);
+      var validatedChallenge = await client.WaitForChallengeValidAsync(dns01Challenge.Url!);
       Console.WriteLine($"  Challenge status: {validatedChallenge.Status}");
 
       dnsStore.RemoveRecord(forwardedTxtRecord);
+      continue;
+    }
+
+    // TLS-ALPN-01 example
+    if (tlsAlpn01Challenge != null)
+    {
+      // TODO: implement when needed
     }
   }
 
@@ -213,7 +224,7 @@ try
   Console.WriteLine($"  Order status: {readyOrder.Status}");
 
   Console.WriteLine("  Finalizing order (submitting CSR)...");
-  var (pendingOrder, certPrivateKey) = await client.FinalizeOrderAsync(readyOrder, new[] { domain });
+  var (pendingOrder, certPrivateKey) = await client.FinalizeOrderAsync(readyOrder, domain);
   Console.WriteLine($"  Order status after finalize: {pendingOrder.Status}");
 
   Console.WriteLine("  Waiting for order to become 'valid'...");
@@ -243,6 +254,7 @@ catch (Exception ex)
 }
 finally
 {
+  await Task.Delay(TimeSpan.FromMinutes(1));
   await webApp.StopAsync();
 }
 
