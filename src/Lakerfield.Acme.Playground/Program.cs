@@ -130,6 +130,12 @@ try
     Console.WriteLine($"  Domain: {authz.Identifier}");
     Console.WriteLine($"  Status: {authz.Status}");
 
+    if (authz.Status == "valid")
+    {
+      Console.WriteLine($"  Authorization already valid, skipping challenges.");
+      continue;
+    }
+
     Challenge? http01Challenge = null;
     Challenge? dns01Challenge = null;
     Challenge? tlsAlpn01Challenge = null;
@@ -161,6 +167,13 @@ try
       Console.WriteLine($"    Key Authorization: {keyAuthValue}");
       Console.WriteLine($"    URL: {challengeUrl}");
       Console.WriteLine();
+
+      if (http01Challenge.Status == "valid")
+      {
+        Console.WriteLine($"  Challenge already valid, skipping validation.");
+        continue;
+      }
+
       Console.WriteLine($"  Token registered on the local web app:");
       Console.WriteLine($"    http://{authz.Identifier}/.well-known/acme-challenge/{token}");
       Console.WriteLine();
@@ -189,6 +202,13 @@ try
       var forwardedTxtRecord = $"{forwardLabel}.{acmeDomain}";
       Console.WriteLine($"  DNS-01 (as alternative):");
       Console.WriteLine($"    TXT record:         {dnsDomain}");
+
+      if (dns01Challenge.Status == "valid")
+      {
+        Console.WriteLine($"  Challenge already valid, skipping validation.");
+        continue;
+      }
+
       Console.WriteLine($"    TXT record value:   {dnsValue}");
       Console.WriteLine($"    or CNAME forwarded: {forwardedTxtRecord}");
 
