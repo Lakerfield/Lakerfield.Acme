@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -74,6 +75,12 @@ try
   Console.WriteLine($"  newAccount: {client.Directory?.NewAccount}");
   Console.WriteLine($"  newOrder:   {client.Directory?.NewOrder}");
   Console.WriteLine($"  newNonce:   {client.Directory?.NewNonce}");
+  if (client.Directory?.Meta?.Profiles is { Count: > 0 } profiles)
+  {
+    Console.WriteLine($"  profiles:");
+    foreach (var (name, url) in profiles)
+      Console.WriteLine($"    {name}: {url}");
+  }
   Console.WriteLine();
 
   // Step 2: Load an existing account or create a new one
@@ -114,8 +121,12 @@ try
 
   // Step 3: Create an order for a domain
   var domain = testDomain;
+  // Select the first advertised profile, if the server provides any
+  var selectedProfile = client.Directory?.Meta?.Profiles?.Keys.FirstOrDefault();
   Console.WriteLine($"Step 3: Creating order for {string.Join(", ", domain)}...");
-  var order = await client.CreateOrderAsync(domain);
+  if (selectedProfile != null)
+    Console.WriteLine($"  Using profile: {selectedProfile}");
+  var order = await client.CreateOrderAsync(selectedProfile, domain);
   Console.WriteLine($"  Order URL: {order.Url}");
   Console.WriteLine($"  Order status: {order.Status}");
   Console.WriteLine($"  Authorizations: {order.Authorizations.Count}");

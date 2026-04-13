@@ -228,7 +228,20 @@ public class LakerfieldAcmeClient : IDisposable
   /// </summary>
   /// <param name="domains">List of domain names (e.g. ["example.com", "www.example.com"])</param>
   /// <returns>AcmeOrder with authorization URLs</returns>
-  public async Task<AcmeOrder> CreateOrderAsync(params string[] domains)
+  public Task<AcmeOrder> CreateOrderAsync(params string[] domains)
+    => CreateOrderAsync(profile: null, domains);
+
+  /// <summary>
+  /// Creates a new certificate order for one or more domains using the specified certificate profile.
+  /// </summary>
+  /// <param name="profile">
+  /// Optional certificate profile name (e.g. "classic", "shortlived").
+  /// Must be one of the profiles advertised in <see cref="AcmeDirectory.Meta"/>.
+  /// Pass <c>null</c> to use the server default.
+  /// </param>
+  /// <param name="domains">List of domain names (e.g. ["example.com", "www.example.com"])</param>
+  /// <returns>AcmeOrder with authorization URLs</returns>
+  public async Task<AcmeOrder> CreateOrderAsync(string? profile, params string[] domains)
   {
     EnsureDirectoryLoaded();
     EnsureAccountLoaded();
@@ -243,7 +256,9 @@ public class LakerfieldAcmeClient : IDisposable
       });
     }
 
-    var payload = new { identifiers = actualIdentifiers };
+    object payload = profile != null
+      ? new { identifiers = actualIdentifiers, profile }
+      : new { identifiers = actualIdentifiers };
     var payloadJson = JsonSerializer.Serialize(payload, _jsonOptions);
     var nonce = await ConsumeNonceAsync().ConfigureAwait(false);
     var jwsBody = JwtHelper.CreateJwsWithKid(_accountKey!, _account!.Url, nonce, _directory!.NewOrder, payloadJson);
