@@ -36,4 +36,10 @@ public class AcmeDirectory
   /// </summary>
   [JsonPropertyName("keyChange")]
   public string? KeyChange { get; set; }
+
+  /// <summary>
+  /// Optional metadata about the ACME server (terms of service, profiles, CAA identities, etc.)
+  /// </summary>
+  [JsonPropertyName("meta")]
+  public AcmeDirectoryMeta? Meta { get; set; }
 }

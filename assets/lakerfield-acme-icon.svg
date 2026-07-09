@@ -1,0 +1,63 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1E88B8"/>
+      <stop offset="100%" stop-color="#0E5E85"/>
+    </linearGradient>
+    <linearGradient id="field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3FA65A"/>
+      <stop offset="100%" stop-color="#256B3B"/>
+    </linearGradient>
+    <linearGradient id="lockGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#EAF3F1"/>
+    </linearGradient>
+    <clipPath id="rounded">
+      <rect x="0" y="0" width="256" height="256" rx="46" ry="46"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#rounded)">
+    <!-- sky / lake backdrop -->
+    <rect x="0" y="0" width="256" height="256" fill="url(#sky)"/>
+
+    <!-- gentle lake ripples -->
+    <path d="M0 150 Q 64 138 128 150 T 256 150 L 256 172 Q 192 160 128 172 T 0 172 Z" fill="#2AA0C9" opacity="0.35"/>
+    <path d="M0 168 Q 64 158 128 168 T 256 168 L 256 186 Q 192 176 128 186 T 0 186 Z" fill="#2AA0C9" opacity="0.3"/>
+
+    <!-- field horizon -->
+    <path d="M0 176 Q 40 158 90 168 Q 140 178 170 160 Q 205 140 256 158 L 256 256 L 0 256 Z" fill="url(#field)"/>
+
+    <!-- subtle field furrows -->
+    <path d="M0 210 Q 64 198 128 210 T 256 206 L 256 256 L 0 256 Z" fill="#1F5C33" opacity="0.5"/>
+
+    <!-- top banner, full width, flush with top/left/right edges -->
+    <rect x="0" y="0" width="256" height="54" fill="#FFFFFF"/>
+    <rect x="0" y="52" width="256" height="3" fill="#0B3D57" opacity="0.25"/>
+  </g>
+
+  <!-- outer rounded border -->
+  <rect x="3" y="3" width="250" height="250" rx="44" ry="44" fill="none" stroke="#0B3D57" stroke-width="4" opacity="0.35"/>
+
+  <text x="128" y="35" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" letter-spacing="1.5" fill="#0E5E85">LAKERFIELD</text>
+
+  <!-- shield -->
+  <g transform="translate(128,134) scale(0.9) translate(-128,-134)">
+    <path d="M128 54
+             L182 76
+             C182 76 182 128 182 138
+             C182 176 158 200 128 214
+             C98 200 74 176 74 138
+             C74 128 74 76 74 76
+             Z"
+          fill="url(#lockGrad)" stroke="#0B3D57" stroke-width="5" stroke-linejoin="round"/>
+
+    <!-- lock body -->
+    <rect x="106" y="120" width="44" height="36" rx="6" fill="#0E5E85"/>
+    <path d="M114 120 L114 106 C114 96 121 89 128 89 C135 89 142 96 142 106 L142 120"
+          fill="none" stroke="#0E5E85" stroke-width="8" stroke-linecap="round"/>
+
+    <!-- checkmark on lock -->
+    <path d="M116 137 L125 146 L142 128" fill="none" stroke="#FFFFFF" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

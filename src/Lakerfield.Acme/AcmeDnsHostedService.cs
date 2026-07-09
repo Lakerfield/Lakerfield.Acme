@@ -162,6 +162,9 @@ public sealed class AcmeDnsHostedService : BackgroundService
     }
     else if (_store.TryGetLiveTxtRecord(qname, out var record))
     {
+#if DEBUG
+      Console.WriteLine($"{qname} => {string.Join(",", record.Values)}");
+#endif
       ttl = record.Ttl;
 
       if (qtype == TypeTxt)

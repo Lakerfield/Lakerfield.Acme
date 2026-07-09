@@ -6,8 +6,10 @@
     <Nullable>enable</Nullable>
 
     <Authors>Michael Lakerveld</Authors>
-    <Copyright>Lakerfield B.V.</Copyright>
     <Company>Lakerfield B.V.</Company>
+    <Product>Lakerfield.Acme</Product>
+    <Description>Lakerfield.Acme provides a minimal c# implementation of the ACME protocol for requesting TLS certificates from Let's Encrypt</Description>
+    <Copyright>Lakerfield B.V.</Copyright>
 
     <PackageProjectUrl>https://github.com/lakerfield/Lakerfield.Acme</PackageProjectUrl>
     <RepositoryUrl>https://github.com/lakerfield/Lakerfield.Acme</RepositoryUrl>
@@ -15,7 +17,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
   </ItemGroup>
 
 </Project>

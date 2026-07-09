@@ -19,7 +19,6 @@ namespace Lakerfield.Acme;
 public class LakerfieldAcmeClient : IDisposable
 {
   private readonly HttpClient _httpClient;
-  private readonly IAcmeStorage _storage;
   private readonly AcmeRetryConfig _retryPolicy;
 
   private AcmeDirectory? _directory;
@@ -34,9 +33,9 @@ public class LakerfieldAcmeClient : IDisposable
   };
 
   /// <summary>
-  /// ACME directory URL (default: Let's Encrypt production)
+  /// ACME directory URL
   /// </summary>
-  public string AcmeServerUrl { get; set; } = "https://acme-v02.api.letsencrypt.org/directory";
+  public Uri AcmeServerUrl { get; }
 
   /// <summary>
   /// Currently loaded ACME account.
@@ -48,10 +47,10 @@ public class LakerfieldAcmeClient : IDisposable
   /// </summary>
   public AcmeDirectory? Directory => _directory;
 
-  public LakerfieldAcmeClient(HttpClient httpClient, IAcmeStorage storage, AcmeRetryConfig? retryPolicy = null)
+  public LakerfieldAcmeClient(Uri acmeDirectoryUrl, HttpClient httpClient, AcmeRetryConfig? retryPolicy = null)
   {
+    AcmeServerUrl = acmeDirectoryUrl;
     _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-    _storage = storage ?? throw new ArgumentNullException(nameof(storage));
     _retryPolicy = retryPolicy ?? RetryHelper.DefaultRetryPolicy;
 
     _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Lakerfield.Acme", "1.0"));
@@ -61,8 +60,8 @@ public class LakerfieldAcmeClient : IDisposable
   /// <summary>
   /// Factory overload without an explicit HttpClient — uses a default HttpClient instance.
   /// </summary>
-  public LakerfieldAcmeClient(IAcmeStorage storage, AcmeRetryConfig? retryPolicy = null)
-    : this(new HttpClient(), storage, retryPolicy)
+  public LakerfieldAcmeClient(Uri acmeDirectoryUrl, AcmeRetryConfig? retryPolicy = null)
+    : this(acmeDirectoryUrl, new HttpClient(), retryPolicy)
   {
   }
 
@@ -158,7 +157,7 @@ public class LakerfieldAcmeClient : IDisposable
   /// <param name="email">Optional email address for Let's Encrypt notifications</param>
   /// <param name="termsOfServiceAgreed">True to agree to the Terms of Service (required by Let's Encrypt)</param>
   /// <returns>The created Account object with URL</returns>
-  public async Task<Account> CreateAccountAsync(string? email = null, bool termsOfServiceAgreed = true)
+  public async Task<Account> CreateAccountAsync(string? email = null, bool termsOfServiceAgreed = false)
   {
     EnsureDirectoryLoaded();
     EnsureAccountKeyLoaded();
@@ -352,13 +351,7 @@ public class LakerfieldAcmeClient : IDisposable
   /// </summary>
   public static string GetDnsValidationForwardLabel(string domain)
   {
-    // Strip wildcard prefix if present
-    var baseDomain = domain.StartsWith("*.") ? domain[2..] : domain;
-    return baseDomain
-      .Replace(".", "-")
-      .Replace("--", "-")
-      .Replace("--", "-")
-      .Trim('-');
+    return AcmeDnsNameHelper.DomainToPrefix(domain);
   }
 
   /// <summary>

@@ -14,7 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 //
 // This example demonstrates the complete ACME workflow:
 // 1. Create an account
-// 2. Place an order for a domain and wildcard
+// 2. Place an order for a wildcard domain
 // 3. Provision the challenge (HTTP-01)
 // 4. Provision the challenge (DNS-01)
 // 5. Validate the challenge
@@ -54,16 +54,12 @@ Console.WriteLine("Lakerfield.Acme Playground");
 Console.WriteLine("==========================");
 Console.WriteLine();
 
-// Use the in-memory storage implementation for this demo
-var storage = new InMemoryAcmeStorage();
-
 // Use Let's Encrypt staging for testing (no real certificates issued)
-var acmeServerUrl = "https://acme-staging-v02.api.letsencrypt.org/directory";
+var acmeDirectoryUrl = WellKnownServers.LetsEncryptStaging;
 
-using var client = new LakerfieldAcmeClient(new HttpClient(), storage);
-client.AcmeServerUrl = acmeServerUrl;
+using var client = new LakerfieldAcmeClient(acmeDirectoryUrl, new HttpClient());
 
-Console.WriteLine($"ACME Server: {acmeServerUrl}");
+Console.WriteLine($"ACME Server: {acmeDirectoryUrl}");
 Console.WriteLine();
 
 try
@@ -74,6 +70,12 @@ try
   Console.WriteLine($"  newAccount: {client.Directory?.NewAccount}");
   Console.WriteLine($"  newOrder:   {client.Directory?.NewOrder}");
   Console.WriteLine($"  newNonce:   {client.Directory?.NewNonce}");
+  if (client.Directory?.Meta?.Profiles is { Count: > 0 } profiles)
+  {
+    Console.WriteLine($"  profiles:");
+    foreach (var (name, url) in profiles)
+      Console.WriteLine($"    {name}: {url}");
+  }
   Console.WriteLine();
 
   // Step 2: Load an existing account or create a new one
@@ -99,7 +101,7 @@ try
     var privateKey = client.GenerateAccountKey();
     Console.WriteLine($"  EC P-256 private key generated ({privateKey.Length} bytes)");
 
-    account = await client.CreateAccountAsync(email: adminEmail);
+    account = await client.CreateAccountAsync(email: adminEmail, termsOfServiceAgreed: false); // set to true if you accept the tos of the provider
     Console.WriteLine($"  Account created: {account.Url}");
     Console.WriteLine($"  Account status: {account.Status}");
 
@@ -276,116 +278,4 @@ finally
 {
   await Task.Delay(TimeSpan.FromMinutes(1));
   await webApp.StopAsync();
-}
-
-// ─── In-Memory Storage implementation ───────────────────────────────────────
-
-/// <summary>
-/// Simple in-memory implementation of IAcmeStorage for demo purposes.
-/// In production, use MongoDB, disk, or another persistent storage backend.
-/// </summary>
-class InMemoryAcmeStorage : IAcmeStorage
-{
-  private readonly Dictionary<string, Lakerfield.Acme.Models.Account> _accounts = new();
-  private readonly Dictionary<string, Lakerfield.Acme.Models.Challenge> _challenges = new();
-  private readonly Dictionary<string, string> _dnsRecords = new();
-  private readonly Dictionary<string, (byte[] cert, byte[] key)> _certificates = new();
-  private readonly Dictionary<string, byte[]> _privateKeys = new();
-
-  public Task<Lakerfield.Acme.Models.Account> GetOrCreateAccountAsync(string keyJwk, string serverUrl)
-  {
-    var key = $"{serverUrl}:{keyJwk}";
-    if (!_accounts.TryGetValue(key, out var account))
-    {
-      account = new Lakerfield.Acme.Models.Account
-      {
-        Id = Guid.NewGuid().ToString(),
-        Url = $"{serverUrl}/acme/acct/{Guid.NewGuid()}",
-        Status = "valid",
-      };
-      _accounts[key] = account;
-    }
-    return Task.FromResult(account);
-  }
-
-  public Task<Lakerfield.Acme.Models.Challenge> GetChallengeAsync(string challengeId)
-  {
-    if (_challenges.TryGetValue(challengeId, out var challenge))
-      return Task.FromResult(challenge);
-    throw new KeyNotFoundException($"Challenge {challengeId} not found");
-  }
-
-  public Task SetChallengeStatusAsync(string challengeId, ChallengeStatus status)
-  {
-    if (_challenges.TryGetValue(challengeId, out var challenge))
-      challenge.Status = status.ToString().ToLower();
-    return Task.CompletedTask;
-  }
-
-  public Task<string?> GetDnsRecordAsync(string validationDomain)
-  {
-    _dnsRecords.TryGetValue(validationDomain, out var value);
-    return Task.FromResult(value);
-  }
-
-  public Task SetDnsRecordAsync(string validationDomain, string value)
-  {
-    _dnsRecords[validationDomain] = value;
-    return Task.CompletedTask;
-  }
-
-  public Task<byte[]> GetPrivateKeyAsync(string accountKeyId)
-  {
-    if (_privateKeys.TryGetValue(accountKeyId, out var key))
-      return Task.FromResult(key);
-    throw new KeyNotFoundException($"Private key {accountKeyId} not found");
-  }
-
-  public Task SaveCertificateAsync(string domainName, byte[] certificate, byte[] privateKey)
-  {
-    _certificates[domainName] = (certificate, privateKey);
-    return Task.CompletedTask;
-  }
-
-  public Task<Lakerfield.Acme.Models.CertificateBundle?> GetCertificateAsync(string domainName)
-  {
-    if (_certificates.TryGetValue(domainName, out var bundle))
-    {
-      return Task.FromResult<Lakerfield.Acme.Models.CertificateBundle?>(new Lakerfield.Acme.Models.CertificateBundle
-      {
-        Certificate = System.Text.Encoding.UTF8.GetString(bundle.cert),
-        PrivateKey = System.Text.Encoding.UTF8.GetString(bundle.key),
-        Domains = new List<string> { domainName },
-        AcmeServerUrl = string.Empty,
-      });
-    }
-    return Task.FromResult<Lakerfield.Acme.Models.CertificateBundle?>(null);
-  }
-
-  public Task RemoveCertificateAsync(string domainName)
-  {
-    _certificates.Remove(domainName);
-    return Task.CompletedTask;
-  }
-
-  public Task<List<Lakerfield.Acme.Models.CertificateBundle>> GetAllCertificatesAsync()
-  {
-    var result = new List<Lakerfield.Acme.Models.CertificateBundle>();
-    foreach (var (domain, bundle) in _certificates)
-    {
-      result.Add(new Lakerfield.Acme.Models.CertificateBundle
-      {
-        Certificate = System.Text.Encoding.UTF8.GetString(bundle.cert),
-        PrivateKey = System.Text.Encoding.UTF8.GetString(bundle.key),
-        Domains = new List<string> { domain },
-        AcmeServerUrl = string.Empty,
-      });
-    }
-    return Task.FromResult(result);
-  }
-
-  public void Dispose()
-  {
-    // Nothing to dispose for in-memory storage
-  }
 }

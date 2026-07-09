@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/lakerfield-acme-icon-256.png" alt="Lakerfield.Acme logo" width="128" />
+</p>
+
 # Lakerfield.Acme
 
 A simple .NET 10 library for interacting with ACME (Automated Certificate Management Environment) servers, implementing [RFC 8555](https://datatracker.ietf.org/doc/html/rfc8555). Compatible with Let's Encrypt and any other RFC 8555 compliant CA.
@@ -5,12 +9,14 @@ A simple .NET 10 library for interacting with ACME (Automated Certificate Manage
 ## Features
 
 - **Account management** — create and load ACME accounts with EC P-256 keys
-- **HTTP-01, DNS-01, and TLS-ALPN-01 challenges** (DNS-01 supports wildcard certificates)
+- **HTTP-01 and DNS-01 challenges** (DNS-01 supports wildcard certificates)
+- **TLS-ALPN-01 certificate generation helper** — generates the self-signed challenge certificate (RFC 8737), but serving it during the TLS/ALPN handshake is not implemented
 - **Certificate ordering, finalization, and download** — full end-to-end workflow
 - **Certificate revocation** and account deactivation
-- **No external dependencies** — uses only built-in .NET APIs (`System.Net.Http`, `System.Text.Json`, `System.Security.Cryptography`)
-- **Storage agnostic** — implement `IAcmeStorage` to use MongoDB, disk, or any other backend
+- **No external dependencies for the core client** — uses only built-in .NET APIs (`System.Net.Http`, `System.Text.Json`, `System.Security.Cryptography`)
+- **Storage agnostic** — the client itself is stateless between calls; persist the account key, account URL, and certificates however you like
 - **Configurable retry policy** with exponential backoff
+- **Optional forwarded DNS-01 server** — `AddAcmeDnsServer()` hosts a minimal authoritative DNS server for CNAME-forwarded `_acme-challenge` validation
 
 ## Installation
 
@@ -24,19 +30,15 @@ dotnet add package Lakerfield.Acme
 using Lakerfield.Acme;
 using Lakerfield.Acme.Models;
 
-// 1. Create the client (provide your IAcmeStorage implementation)
-var storage = new MyAcmeStorage(); // your implementation of IAcmeStorage
-using var client = new LakerfieldAcmeClient(new HttpClient(), storage);
-
-// Use Let's Encrypt staging for testing
-client.AcmeServerUrl = "https://acme-staging-v02.api.letsencrypt.org/directory";
+// 1. Create the client — use WellKnownServers.LetsEncryptStaging for testing
+using var client = new LakerfieldAcmeClient(WellKnownServers.LetsEncryptStaging, new HttpClient());
 
 // 2. Load the ACME directory
 await client.LoadDirectoryAsync();
 
 // 3. Generate an account key and create an account
 var privateKeyBytes = client.GenerateAccountKey();
-var account = await client.CreateAccountAsync(email: "admin@example.com");
+var account = await client.CreateAccountAsync(email: "admin@example.com", termsOfServiceAgreed: false); // set to true if you accept the tos of the provider
 
 // Save privateKeyBytes and account.Url for future use!
 
@@ -100,13 +102,13 @@ var dnsValidationDomain = LakerfieldAcmeClient.GetDnsValidationDomain(domain);
 await client.ValidateChallengeAsync(dnsChallenge.Url!);
 ```
 
-### TLS-ALPN-01
+### TLS-ALPN-01 (experimental — not implemented end-to-end)
 
-Generate a self-signed certificate with the `acmeIdentifier` OID extension (RFC 8737):
+`GenerateTlsAlpnCertificate` generates a self-signed certificate with the `acmeIdentifier` OID extension (RFC 8737), but the library does not include a TLS listener that presents this certificate during the `acme-tls/1` ALPN handshake. You would need to build that part yourself, and this challenge type has not been tested against a real ACME server:
 
 ```csharp
 var cert = client.GenerateTlsAlpnCertificate(domain, token);
-// Serve cert during TLS handshake with ALPN "acme-tls/1", then call:
+// You must serve this cert yourself during the TLS handshake with ALPN protocol "acme-tls/1" — not provided by this library.
 await client.ValidateChallengeAsync(tlsChallenge.Url!);
 ```
 
@@ -121,25 +123,14 @@ await client.LoadDirectoryAsync();
 var account = await client.LoadAccountAsync(savedAccountUrl, savedKey);
 ```
 
-## Storage Interface
+## Persisting State
 
-Implement `IAcmeStorage` to persist ACME data using any backend:
+`LakerfieldAcmeClient` has no built-in storage — it's up to the host application to persist whatever it needs between calls:
 
-```csharp
-public interface IAcmeStorage : IDisposable
-{
-    Task<Account> GetOrCreateAccountAsync(string keyJwk, string serverUrl);
-    Task<Challenge> GetChallengeAsync(string challengeId);
-    Task SetChallengeStatusAsync(string challengeId, ChallengeStatus status);
-    Task<string?> GetDnsRecordAsync(string validationDomain);
-    Task SetDnsRecordAsync(string validationDomain, string value);
-    Task<byte[]> GetPrivateKeyAsync(string accountKeyId);
-    Task SaveCertificateAsync(string domainName, byte[] certificate, byte[] privateKey);
-    Task<CertificateBundle?> GetCertificateAsync(string domainName);
-    Task RemoveCertificateAsync(string domainName);
-    Task<List<CertificateBundle>> GetAllCertificatesAsync();
-}
-```
+- The account private key (from `GenerateAccountKey()`) and `account.Url`, so you can call `LoadAccountAsync` later instead of creating a new account.
+- The certificate private key and PEM chain returned by `FinalizeOrderAsync`/`DownloadCertificateAsync`, using whatever storage backend fits (disk, database, secret manager, ...).
+
+See [Loading an Existing Account](#loading-an-existing-account) above for the account key/URL round-trip.
 
 ## Retry Policy
 
@@ -153,25 +144,46 @@ var retryConfig = new AcmeRetryConfig
     MaxDelaySeconds = 60,
     ExponentialBase = 2,
 };
-using var client = new LakerfieldAcmeClient(new HttpClient(), storage, retryConfig);
+using var client = new LakerfieldAcmeClient(WellKnownServers.LetsEncryptStaging, new HttpClient(), retryConfig);
+```
+
+## Forwarded DNS-01 Server
+
+For DNS-01 validation without giving the library write access to your real DNS zone, `AddAcmeDnsServer` hosts a minimal authoritative DNS server that answers TXT queries for a dedicated zone. Point a `CNAME` from `_acme-challenge.<domain>` to that zone and the ACME server will follow the forward to resolve the TXT record:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+
+builder.Services.AddAcmeDnsServer(options =>
+{
+    options.BindAddress = IPAddress.Any;
+    options.Port = 53;
+    options.ZoneName = "acme.example.com";
+    options.DefaultTtl = 30;
+});
+
+// Later, once you have the DNS-01 value for a challenge:
+var dnsStore = app.Services.GetRequiredService<IAcmeDnsChallengeStore>();
+var forwardLabel = LakerfieldAcmeClient.GetDnsValidationForwardLabel(domain);
+dnsStore.SetTxtRecord($"{forwardLabel}.acme.example.com", dnsValue, ttl: 30, validFor: TimeSpan.FromMinutes(10));
 ```
 
 ## Playground
 
 The `src/Lakerfield.Acme.Playground` project demonstrates the complete workflow end-to-end:
 
-- Creates a minimal ASP.NET Core web app to handle HTTP-01 challenge responses
+- Creates a minimal ASP.NET Core web app to handle HTTP-01 challenge responses and hosts the forwarded DNS-01 server
 - Loads or creates an ACME account (persists key to temp directory)
 - Creates an order, processes HTTP-01 and DNS-01 challenges
 - Finalizes the order and downloads the PEM certificate chain
 
-Run the playground (requires port 80 access for HTTP-01 validation):
+Run the playground (requires port 80 access for HTTP-01 validation, and port 53 for the forwarded DNS-01 server):
 
 ```bash
 dotnet run --project src/Lakerfield.Acme.Playground
 ```
 
-Sample output:
+Sample output of a wildcard certificate request:
 ```
 Lakerfield.Acme Playground
 ==========================
@@ -182,26 +194,48 @@ Step 1: Loading ACME directory...
   newAccount: https://acme-staging-v02.api.letsencrypt.org/acme/new-acct
   newOrder:   https://acme-staging-v02.api.letsencrypt.org/acme/new-order
   newNonce:   https://acme-staging-v02.api.letsencrypt.org/acme/new-nonce
+  profiles:
+    classic: https://letsencrypt.org/docs/profiles#classic
+    shortlived: https://letsencrypt.org/docs/profiles#shortlived
+    tlsserver: https://letsencrypt.org/docs/profiles#tlsserver
 
 Step 2: Creating new account...
   EC P-256 private key generated (138 bytes)
-  Account created: https://acme-staging-v02.api.letsencrypt.org/acme/acct/123456789
+  Account created: https://acme-staging-v02.api.letsencrypt.org/acme/acct/1234
   Account status: valid
   Private key saved: /tmp/acme-account-key.der
   Account URL saved: /tmp/acme-account-url.txt
 
-Step 3: Creating order for example.com...
-  Order URL: https://acme-staging-v02.api.letsencrypt.org/acme/order/...
+Step 3: Creating order for example.com, *.example.com...
+  Order URL: https://acme-staging-v02.api.letsencrypt.org/acme/order/1234/12345
   Order status: pending
-  Authorizations: 1
+  Authorizations: 2
 
 Step 4: Processing authorizations...
-  Authorization: https://acme-staging-v02.api.letsencrypt.org/acme/authz-v3/...
+  Authorization: https://acme-staging-v02.api.letsencrypt.org/acme/authz-v3/1234/123456
   Domain: example.com
   Status: pending
-    Challenge type: http-01, status: pending
+    Challenge type: dns-persist-01, status: pending
     Challenge type: dns-01, status: pending
+  DNS-01 (as alternative):
+    TXT record:         _acme-challenge.example.com
+    TXT record value:   <token>
+    or CNAME forwarded: example-com.acme.example-provider.com
+  Validating challenge...
+  Waiting for challenge validation...
+eXAmpLe-cOM.acMe.ExampLe-ProVider.COM => <token>
+eXAMpLE-com.acmE.eXaMPle-prOviDER.Com => <token>
+EXAMple-coM.AcMe.EXampLE-PROvideR.com => <token>
+examPLe-Com.aCme.ExAMPLE-PROViDeR.coM => <token>
+  Challenge status: valid
+  Authorization: https://acme-staging-v02.api.letsencrypt.org/acme/authz/1234/123457
+  Domain: example.com
+  Status: pending
+    Challenge type: dns-01, status: pending
+    Challenge type: dns-persist-01, status: pending
+    Challenge type: http-01, status: pending
     Challenge type: tls-alpn-01, status: pending
+
 
   HTTP-01 Challenge:
     Token: <token>
@@ -213,11 +247,11 @@ Step 4: Processing authorizations...
 
   Validating challenge...
   Waiting for challenge validation...
+http://example.com/.well-known/acme-challenge/<token> - 200
+http://example.com/.well-known/acme-challenge/<token> - 200
+http://example.com/.well-known/acme-challenge/<token> - 200
+http://example.com/.well-known/acme-challenge/<token> - 200
   Challenge status: valid
-
-  DNS-01 (as alternative):
-    TXT record domain: _acme-challenge.example.com
-    TXT record value:  <base64url-digest>
 
 Step 5: Requesting and downloading certificate...
   Waiting for order to become 'ready'...
@@ -230,8 +264,23 @@ Step 5: Requesting and downloading certificate...
 
 ─── PEM Certificate ────────────────────────────────────────────────────────
 -----BEGIN CERTIFICATE-----
+... encoded certificate
+- Common Name: example.com
+- Subject Alternative Names: *.example.com, example.com
+- Valid From: ...
+- Valid To: ...
+- Serial Number: ...
 ...
 -----END CERTIFICATE-----
+
+-----BEGIN CERTIFICATE-----
+... encoded intermediate certificate
+-----END CERTIFICATE-----
+
+-----BEGIN CERTIFICATE-----
+... encoded root certificate
+-----END CERTIFICATE-----
+
 ────────────────────────────────────────────────────────────────────────────
 
 Demo completed successfully!
@@ -239,10 +288,15 @@ Demo completed successfully!
 
 ## ACME Server URLs
 
-| Environment | URL |
-|-------------|-----|
-| Let's Encrypt Production | `https://acme-v02.api.letsencrypt.org/directory` |
-| Let's Encrypt Staging | `https://acme-staging-v02.api.letsencrypt.org/directory` |
+`WellKnownServers` provides `Uri`s for common CAs so you don't have to hardcode them:
+
+| Environment | `WellKnownServers` member | URL |
+|-------------|----------------------------|-----|
+| Let's Encrypt Production | `LetsEncrypt` | `https://acme-v02.api.letsencrypt.org/directory` |
+| Let's Encrypt Staging | `LetsEncryptStaging` | `https://acme-staging-v02.api.letsencrypt.org/directory` |
+| ZeroSSL | `ZeroSsl` | `https://acme.zerossl.com/v2/DV90` |
+
+Any other RFC 8555 compliant CA works too — just pass its directory `Uri` to the `LakerfieldAcmeClient` constructor.
 
 ## Building
 
