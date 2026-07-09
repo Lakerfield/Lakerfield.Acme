@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="assets/lakerfield-acme-icon-256.png" alt="Lakerfield.Acme logo" width="128" />
-</p>
+![Lakerfield.Acme logo](assets/lakerfield-acme-icon-256.png)
 
 # Lakerfield.Acme
 
