@@ -32,7 +32,6 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
-    <None Include="..\..\assets\lakerfield-acme-icon-256.png" Pack="true" PackagePath="assets\" />
     <None Include="icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
