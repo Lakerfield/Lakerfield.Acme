@@ -1,4 +1,4 @@
-![Lakerfield.Acme logo](https://github.com/Lakerfield/Lakerfield.Acme/raw/main/assets/lakerfield-acme-icon-256.png)
+![Lakerfield.Acme logo](https://raw.githubusercontent.com/Lakerfield/Lakerfield.Acme/main/assets/lakerfield-acme-icon-256.png)
 
 # Lakerfield.Acme
 

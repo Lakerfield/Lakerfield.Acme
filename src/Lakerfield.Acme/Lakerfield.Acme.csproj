@@ -12,6 +12,7 @@
     <Copyright>Lakerfield B.V.</Copyright>
 
     <PackageProjectUrl>https://github.com/lakerfield/Lakerfield.Acme</PackageProjectUrl>
+    <PackageTags>ACME;letsencrypt;HTTPS;TLS;SSL;Certificate;LakerProxy</PackageTags>
     <RepositoryUrl>https://github.com/lakerfield/Lakerfield.Acme</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
