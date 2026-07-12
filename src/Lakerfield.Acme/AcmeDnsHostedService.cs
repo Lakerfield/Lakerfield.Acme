@@ -84,7 +84,7 @@ public sealed class AcmeDnsHostedService : BackgroundService
 
       try
       {
-        response = CreateResponse(received.Buffer);
+        response = CreateResponse(received.Buffer, received.RemoteEndPoint);
       }
       catch (Exception ex)
       {
@@ -114,7 +114,7 @@ public sealed class AcmeDnsHostedService : BackgroundService
     base.Dispose();
   }
 
-  private byte[] CreateResponse(byte[] queryBytes)
+  private byte[] CreateResponse(byte[] queryBytes, IPEndPoint remoteEndPoint)
   {
     var query = queryBytes.AsSpan();
 
@@ -169,6 +169,8 @@ public sealed class AcmeDnsHostedService : BackgroundService
 
       if (qtype == TypeTxt)
       {
+        NotifyTxtQuery(qname, remoteEndPoint, true);
+
         foreach (var value in record.Values)
         {
           answerRdatas.Add(BuildTxtRData(value));
@@ -180,6 +182,9 @@ public sealed class AcmeDnsHostedService : BackgroundService
     }
     else
     {
+      if (qtype == TypeTxt)
+        NotifyTxtQuery(qname, remoteEndPoint, false);
+
       rcode = RCodeNxDomain;
     }
 
@@ -208,6 +213,18 @@ public sealed class AcmeDnsHostedService : BackgroundService
     }
 
     return response.ToArray();
+  }
+
+  private void NotifyTxtQuery(string qname, IPEndPoint remoteEndPoint, bool found)
+  {
+    try
+    {
+      _options.OnTxtQuery?.Invoke(qname, remoteEndPoint, found);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "OnTxtQuery callback failed for {QName}.", qname);
+    }
   }
 
   private static byte[] BuildTxtRData(string value)

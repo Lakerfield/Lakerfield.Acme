@@ -39,6 +39,7 @@ builder.Services.AddAcmeDnsServer(options =>
   options.Port = 53;
   options.ZoneName = acmeDomain;
   options.DefaultTtl = 30;
+  options.OnTxtQuery = (qname, remoteEndPoint, found) => Console.WriteLine($"dns-01 TXT query {qname} from {remoteEndPoint.Address} => {(found ? "ok" : "not found")}");
 });
 
 var webApp = builder.Build();
